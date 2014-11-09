@@ -1,4 +1,24 @@
 /*
+ * This software makes use of the YAJL library, which is released under the ISC license
+ */
+
+/*
+ * Copyright (c) 2007-2014, Lloyd Hilaiel <me@lloyd.io>
+ *
+ * Permission to use, copy, modify, and/or distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice and this permission notice appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
+/*
  * YAJL needs cmake to build
  * cd yayl/
  * ./configure
@@ -8,8 +28,9 @@
  * -L yajl/build/yajl-2.1.1/lib
  */
 
-#include <yajl/yajl_parse.h>  
-#include <yajl/yajl_gen.h>  
+#include "yajl/yajl_parse.h"
+#include "yajl/yajl_gen.h"
+#include "yajl/yajl_tree.h"
 
 #include <stdio.h>
 #include <stdlib.h> //abort, getenv
@@ -19,8 +40,17 @@
 #include <fcntl.h> // open
 #include <unistd.h> // close, getopt
 #include <string.h> // strstr
+#include <stdbool.h> // C99 advancedness
 
 #define Dbg(...) \
+{ \
+	if (opt_debug) { \
+	fprintf(stderr, __VA_ARGS__); \
+	fprintf(stderr, "\n"); \
+	} \
+}
+
+#define Se(...) \
 { \
 	fprintf(stderr, __VA_ARGS__); \
 	fprintf(stderr, "\n"); \
@@ -57,91 +87,106 @@ if (assertion) \
 }
 
 /*
+ * Option globals
+ */
+
+int opt_debug = 0;
+
+/*
  * YAJL callbacks
  */
 
-static int reformat_null(void * ctx)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_null(g);  
-}  
-  
-static int reformat_boolean(void * ctx, int boolean)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_bool(g, boolean);  
-}  
-  
-static int reformat_number(void * ctx, const char * s, size_t l)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_number(g, s, l);  
-}  
-  
-static int reformat_string(void * ctx, const unsigned char * stringVal,  
-                           size_t stringLen)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);  
-}  
-  
-static int reformat_map_key(void * ctx, const unsigned char * stringVal,  
-                            size_t stringLen)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);  
-}  
-  
-static int reformat_start_map(void * ctx)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_map_open(g);  
-}  
-  
-  
-static int reformat_end_map(void * ctx)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_map_close(g);  
-}  
-  
-static int reformat_start_array(void * ctx)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_array_open(g);  
-}  
-  
-static int reformat_end_array(void * ctx)  
-{  
-    yajl_gen g = (yajl_gen) ctx;  
-    return yajl_gen_status_ok == yajl_gen_array_close(g);  
-}  
+static int 
+reformat_null(void *ctx)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_null(g);
+}
 
-static yajl_callbacks callbacks = {  
-    reformat_null,  
-    reformat_boolean,  
-    NULL,  
-    NULL,  
-    reformat_number,  
-    reformat_string,  
-    reformat_start_map,  
-    reformat_map_key,  
-    reformat_end_map,  
-    reformat_start_array,  
-    reformat_end_array  
-};  
+static int 
+reformat_boolean(void *ctx, int boolean)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_bool(g, boolean);
+}
+
+static int 
+reformat_number(void *ctx, const char *s, size_t l)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_number(g, s, l);
+}
+
+static int 
+reformat_string(void *ctx, const unsigned char *stringVal,
+		size_t stringLen)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
+}
+
+static int 
+reformat_map_key(void *ctx, const unsigned char *stringVal,
+		 size_t stringLen)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
+}
+
+static int 
+reformat_start_map(void *ctx)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_map_open(g);
+}
+
+
+static int 
+reformat_end_map(void *ctx)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_map_close(g);
+}
+
+static int 
+reformat_start_array(void *ctx)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_array_open(g);
+}
+
+static int 
+reformat_end_array(void *ctx)
+{
+	yajl_gen	g = (yajl_gen) ctx;
+	return yajl_gen_status_ok == yajl_gen_array_close(g);
+}
+
+static yajl_callbacks callbacks = {
+	reformat_null,
+	reformat_boolean,
+	NULL,
+	NULL,
+	reformat_number,
+	reformat_string,
+	reformat_start_map,
+	reformat_map_key,
+	reformat_end_map,
+	reformat_start_array,
+	reformat_end_array
+};
 
 /*
- * > Does the folder exist? 
- * > No: create 
- * > Yes with wrong permissions: fatal complain 
+ * > Does the folder exist?
+ * > No: create
+ * > Yes with wrong permissions: fatal complain
  * > Yes with right permissions: continue
  */
 
 int
 check_dir(char *dirpath)
 {
-struct stat	buffer;
+	struct stat	buffer;
 	int		status;
 	int		fildes;
 
@@ -154,21 +199,19 @@ struct stat	buffer;
 		Dbg("Making folder %s", dirpath);
 		status = mkdir(dirpath, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		/*
-		 * S_IRWXU read, write, execute/search by owner 
+		 * S_IRWXU read, write, execute/search by owner
 		 * S_IRWXG read, write, execute/search by group
-		 * S_IROTH read permission, others 
-		 * S_IXOTH execute/search permission, others 
+		 * S_IROTH read permission, others
+		 * S_IXOTH execute/search permission, others
 		 */
 		Stopif(status != 0, return -1, "Make folder %s failed.", dirpath);
 	}
-
 	fildes = open(dirpath, O_RDONLY | O_DIRECTORY);
 	status = fstat(fildes, &buffer);
 	close(fildes);
 
 	/* Check directory, readable, writeable */
-	if (S_ISDIR(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) 
-	{
+	if (S_ISDIR(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
 		Dbg("We are in business");
 	} else {
 		Dbg("Not a directory or not read/writable");
@@ -177,15 +220,16 @@ struct stat	buffer;
 	return 0;
 }
 
-int check_file(char *filepath)
+int 
+make_file(char *filepath)
 {
 	/*
-	 * > Does the file exist? 
-	 * > No: create 
+	 * > Does the file exist?
+	 * > No: create
 	 * > Yes with wrong permissions: fatal complain
 	 * > Yes with right permissions: continue
 	 */
-	
+
 	struct stat	buffer;
 	int		status;
 	int		fildes;
@@ -200,7 +244,7 @@ int check_file(char *filepath)
 		fildes = open(filepath, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
 		/*
-		 * O_WRONLY write only 
+		 * O_WRONLY write only
 		 * O_CREAT create
 		 * O_EXCL fail if file exists
 		 * S_IRUSR read permission, owner
@@ -212,14 +256,12 @@ int check_file(char *filepath)
 		Stopif(fildes == -1, return -1, "Open file %s for writing has failed.", filepath);
 		close(fildes);
 	}
-
 	fildes = open(filepath, O_RDONLY);
 	status = fstat(fildes, &buffer);
 	close(fildes);
 
 	/* Check regular file, readable, writeable */
-	if (S_ISREG(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) 
-	{
+	if (S_ISREG(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
 		Dbg("We are in business");
 	} else {
 		Dbg("Not a file or not read/writable");
@@ -228,7 +270,7 @@ int check_file(char *filepath)
 	close(fildes);
 }
 
-int 
+int
 test_colours()
 {
 	int		colour_count = 15;
@@ -279,209 +321,347 @@ test_colours()
 }
 
 /* From example at http://curl.haxx.se/libcurl/c/simple.html */
+/* TODO: add check for 401 response */
 
-int curl_grab(char *url, char *filepath)
+int 
+curl_grab(char *url, char *filepath)
 {
-  CURL *curl;
-  CURLcode res;
-  FILE *fp;
+	CURL           *curl;
+	CURLcode	res;
+	FILE           *fp;
 
-  fp = fopen(filepath, "w");
-  if (!fp) return -1;
- 
-  curl = curl_easy_init();
-  if(curl) {
-    curl_easy_setopt(curl, CURLOPT_URL, url);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-    /* example.com is redirected, so we tell libcurl to follow redirection */ 
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
- 
-    /* Perform the request, res will get the return code */ 
-    res = curl_easy_perform(curl);
-    /* Check for errors */ 
-    if(res != CURLE_OK)
-      fprintf(stderr, "curl_easy_perform() failed: %s\n",
-              curl_easy_strerror(res));
- 
-    /* always cleanup */ 
-    curl_easy_cleanup(curl);
-  }
+	fp = fopen(filepath, "w");
+	if (!fp)
+		return -1;
 
-  fclose(fp);
+	curl = curl_easy_init();
+	if (curl) {
+		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+		/*
+		 * example.com is redirected, so we tell libcurl to follow
+		 * redirection
+		 */
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 
-  return 0;
+		/* Perform the request, res will get the return code */
+		res = curl_easy_perform(curl);
+		/* Check for errors */
+		if (res != CURLE_OK)
+			fprintf(stderr, "curl_easy_perform() failed: %s\n",
+				curl_easy_strerror(res));
+
+		/* always cleanup */
+		curl_easy_cleanup(curl);
+	}
+	fclose(fp);
+
+	return 0;
 }
 
 /* From example at http://curl.haxx.se/libcurl/c/simplessl.html */
 
-int curl_grab_ssl(char *url, char *buffer_file)
+int 
+curl_grab_ssl(char *url, char *buffer_file)
 {
-  int i;
-  CURL *curl;
-  CURLcode res;
-  FILE *headerfile;
-  const char *pPassphrase = NULL;
- 
-  static const char *pCertFile = "testcert.pem";
-  static const char *pCACertFile="cacert.pem";
- 
-  const char *pKeyName;
-  const char *pKeyType;
- 
-  const char *pEngine;
- 
+	int		i;
+	CURL           *curl;
+	CURLcode	res;
+	FILE           *headerfile;
+	const char     *pPassphrase = NULL;
+
+	static const char *pCertFile = "testcert.pem";
+	static const char *pCACertFile = "cacert.pem";
+
+	const char     *pKeyName;
+	const char     *pKeyType;
+
+	const char     *pEngine;
+
 #ifdef USE_ENGINE
-  pKeyName  = "rsa_test";
-  pKeyType  = "ENG";
-  pEngine   = "chil";            /* for nChiper HSM... */ 
+	pKeyName = "rsa_test";
+	pKeyType = "ENG";
+	pEngine = "chil";	/* for nChiper HSM... */
 #else
-  pKeyName  = "testkey.pem";
-  pKeyType  = "PEM";
-  pEngine   = NULL;
+	pKeyName = "testkey.pem";
+	pKeyType = "PEM";
+	pEngine = NULL;
 #endif
- 
-  headerfile = fopen("dumpit", "w");
- 
-  curl_global_init(CURL_GLOBAL_DEFAULT);
- 
-  curl = curl_easy_init();
-  if(curl) {
-    /* what call to write: */ 
-    curl_easy_setopt(curl, CURLOPT_URL, "https://api.pinboard.in/v1/posts/all");
-    curl_easy_setopt(curl, CURLOPT_HEADERDATA, headerfile);
- 
-    for(i = 0; i < 1; i++) /* single-iteration loop, just to break out from */ 
-    {
-      if (pEngine)             /* use crypto engine */ 
-      {
-        if (curl_easy_setopt(curl, CURLOPT_SSLENGINE,pEngine) != CURLE_OK)
-        {                     /* load the crypto engine */ 
-          fprintf(stderr,"can't set crypto engine\n");
-          break;
-        }
-        if (curl_easy_setopt(curl, CURLOPT_SSLENGINE_DEFAULT,1L) != CURLE_OK)
-        { /* set the crypto engine as default */ 
-          /* only needed for the first time you load
- *              a engine in a curl object... */ 
-          fprintf(stderr,"can't set crypto engine as default\n");
-          break;
-        }
-      }
-      /* cert is stored PEM coded in file... */ 
-      /* since PEM is default, we needn't set it for PEM */ 
-      curl_easy_setopt(curl,CURLOPT_SSLCERTTYPE,"PEM");
- 
-      /* set the cert for client authentication */ 
-      curl_easy_setopt(curl,CURLOPT_SSLCERT,pCertFile);
- 
-      /* sorry, for engine we must set the passphrase
- *          (if the key has one...) */ 
-      if (pPassphrase)
-        curl_easy_setopt(curl,CURLOPT_KEYPASSWD,pPassphrase);
- 
-      /* if we use a key stored in a crypto engine,
- *          we must set the key type to "ENG" */ 
-      curl_easy_setopt(curl,CURLOPT_SSLKEYTYPE,pKeyType);
- 
-      /* set the private key (file or ID in engine) */ 
-      curl_easy_setopt(curl,CURLOPT_SSLKEY,pKeyName);
- 
-      /* set the file with the certs vaildating the server */ 
-      curl_easy_setopt(curl,CURLOPT_CAINFO,pCACertFile);
- 
-      /* disconnect if we can't validate server's cert */ 
-      curl_easy_setopt(curl,CURLOPT_SSL_VERIFYPEER,1L);
- 
-      /* Perform the request, res will get the return code */ 
-      res = curl_easy_perform(curl);
-      /* Check for errors */ 
-      if(res != CURLE_OK)
-        fprintf(stderr, "curl_easy_perform() failed: %s\n",
-                curl_easy_strerror(res));
- 
-      /* we are done... */ 
-    }
-    /* always cleanup */ 
-    curl_easy_cleanup(curl);
-  }
- 
-  curl_global_cleanup();
- 
-  return 0;
+
+	headerfile = fopen("dumpit", "w");
+
+	curl_global_init(CURL_GLOBAL_DEFAULT);
+
+	curl = curl_easy_init();
+	if (curl) {
+		/* what call to write: */
+		curl_easy_setopt(curl, CURLOPT_URL, "https://api.pinboard.in/v1/posts/all");
+		curl_easy_setopt(curl, CURLOPT_HEADERDATA, headerfile);
+
+		for (i = 0; i < 1; i++) {	/* single-iteration loop,
+						 * just to break out from */
+			if (pEngine) {	/* use crypto engine */
+				if (curl_easy_setopt(curl, CURLOPT_SSLENGINE, pEngine) != CURLE_OK) {	/* load the crypto
+													 * engine */
+					fprintf(stderr, "can't set crypto engine\n");
+					break;
+				}
+				if (curl_easy_setopt(curl, CURLOPT_SSLENGINE_DEFAULT, 1L) != CURLE_OK) {	/* set the crypto engine
+														 * as default */
+					/*
+					 * only needed for the first time you
+					 * load a engine in a curl object...
+					 */
+					fprintf(stderr, "can't set crypto engine as default\n");
+					break;
+				}
+			}
+			/* cert is stored PEM coded in file... */
+			/* since PEM is default, we needn't set it for PEM */
+			curl_easy_setopt(curl, CURLOPT_SSLCERTTYPE, "PEM");
+
+			/* set the cert for client authentication */
+			curl_easy_setopt(curl, CURLOPT_SSLCERT, pCertFile);
+
+			/*
+			 * sorry, for engine we must set the passphrase (if
+			 * the key has one...)
+			 */
+			if (pPassphrase)
+				curl_easy_setopt(curl, CURLOPT_KEYPASSWD, pPassphrase);
+
+			/*
+			 * if we use a key stored in a crypto engine, we must
+			 * set the key type to "ENG"
+			 */
+			curl_easy_setopt(curl, CURLOPT_SSLKEYTYPE, pKeyType);
+
+			/* set the private key (file or ID in engine) */
+			curl_easy_setopt(curl, CURLOPT_SSLKEY, pKeyName);
+
+			/* set the file with the certs vaildating the server */
+			curl_easy_setopt(curl, CURLOPT_CAINFO, pCACertFile);
+
+			/* disconnect if we can't validate server's cert */
+			curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+
+			/* Perform the request, res will get the return code */
+			res = curl_easy_perform(curl);
+			/* Check for errors */
+			if (res != CURLE_OK)
+				fprintf(stderr, "curl_easy_perform() failed: %s\n",
+					curl_easy_strerror(res));
+
+			/* we are done... */
+		}
+		/* always cleanup */
+		curl_easy_cleanup(curl);
+	}
+	curl_global_cleanup();
+
+	return 0;
 }
 
-int read_json(char *filename)
+int 
+pretty_json_output(char *filename)
 {
-	yajl_handle hand;
-    static unsigned char fileData[65536];
-    /* generator config */
-    yajl_gen g;
-    yajl_status stat;
-    size_t rd;
-    int retval = 0;
-    int a = 1;
-	FILE *fp;
+	yajl_handle	hand;
+	static unsigned char fileData[65536];
+	/* generator config */
+	yajl_gen	g;
+	yajl_status	stat;
+	size_t		rd;
+	int		retval = 0;
+	int		a = 1;
+	FILE           *fp;
 
 	fp = fopen(filename, "r");
-	if(!fp) return -1;
+	if (!fp)
+		return -1;
 
-    g = yajl_gen_alloc(NULL);
-    yajl_gen_config(g, yajl_gen_beautify, 1);
-    yajl_gen_config(g, yajl_gen_validate_utf8, 1);
+	g = yajl_gen_alloc(NULL);
+	yajl_gen_config(g, yajl_gen_beautify, 1);
+	yajl_gen_config(g, yajl_gen_validate_utf8, 1);
 
-    /* ok.  open file.  let's read and parse */
-    hand = yajl_alloc(&callbacks, NULL, (void *) g);
-    /* and let's allow comments by default */
-    yajl_config(hand, yajl_allow_comments, 1);
+	/* ok.  open file.  let's read and parse */
+	hand = yajl_alloc(&callbacks, NULL, (void *)g);
+	/* and let's allow comments by default */
+	yajl_config(hand, yajl_allow_comments, 1);
 
 
-    for (;;) {
-        rd = fread((void *) fileData, 1, sizeof(fileData) - 1, fp);
+	for (;;) {
+		rd = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
 
-        if (rd == 0) {
-            if (!feof(fp)) {
-                fprintf(stderr, "error on file read.\n");
-                retval = 1;
-            }
-            break;
-        }
-        fileData[rd] = 0;
+		if (rd == 0) {
+			if (!feof(fp)) {
+				fprintf(stderr, "error on file read.\n");
+				retval = 1;
+			}
+			break;
+		}
+		fileData[rd] = 0;
 
-        stat = yajl_parse(hand, fileData, rd);
+		stat = yajl_parse(hand, fileData, rd);
 
-        if (stat != yajl_status_ok) break;
+		if (stat != yajl_status_ok)
+			break;
 
-        {
-            const unsigned char * buf;
-            size_t len;
-            yajl_gen_get_buf(g, &buf, &len);
-            fwrite(buf, 1, len, stdout);
-            yajl_gen_clear(g);
-        }
-    }
+		{
+			const unsigned char *buf;
+			size_t		len;
 
-    stat = yajl_complete_parse(hand);
+			yajl_gen_get_buf(g, &buf, &len);
+			fwrite(buf, 1, len, stdout);
+			yajl_gen_clear(g);
+		}
+	}
 
-    if (stat != yajl_status_ok) {
-        unsigned char * str = yajl_get_error(hand, 1, fileData, rd);
-        fprintf(stderr, "%s", (const char *) str);
-        yajl_free_error(hand, str);
-        retval = 1;
-    }
+	stat = yajl_complete_parse(hand);
 
-    yajl_gen_free(g);
-    yajl_free(hand);
+	if (stat != yajl_status_ok) {
+		unsigned char  *str = yajl_get_error(hand, 1, fileData, rd);
+		fprintf(stderr, "%s", (const char *)str);
+		yajl_free_error(hand, str);
+		retval = 1;
+	}
+	yajl_gen_free(g);
+	yajl_free(hand);
 	fclose(fp);
 }
+
+int parse_handoff(unsigned char *buf, size_t len)
+{
+	char *loc = NULL;
+	bool between_quotes = 0;
+	int between_quotes_n = 0;
+
+	loc = buf;
+
+	Dbg("Len is %i", len);
+
+	for (int j = 0; j < len; j++)
+	{
+		if (*loc == '"')
+		{
+			between_quotes = !between_quotes;
+
+			if (between_quotes) 
+				between_quotes_n++;
+
+			if (!between_quotes)
+			{
+				if ((between_quotes_n % 2) == 0) /* If even */
+					fputc('\n', stdout);
+				else
+					fputc(':', stdout);
+			}
+		} else {	
+			if (between_quotes)
+				fputc(*loc, stdout);
+		}
+
+		loc++;
+	}
+
+	putc('\n', stdout);
+
+	return 0;
+}
+
+int 
+output(char *filename)
+{
+	yajl_handle	hand;
+	static unsigned char fileData[65536];
+	/* generator config */
+	yajl_gen	g;
+	yajl_status	stat;
+	size_t		rd;
+	int		retval = 0;
+	int		a = 1;
+	FILE           *fp;
+
+	fp = fopen(filename, "r");
+	if (!fp)
+		return -1;
+	else Dbg("Output open suceeded");
+
+	g = yajl_gen_alloc(NULL);
+	yajl_gen_config(g, yajl_gen_beautify, 1);
+	yajl_gen_config(g, yajl_gen_validate_utf8, 1);
+
+	/* ok.  open file.  let's read and parse */
+	hand = yajl_alloc(&callbacks, NULL, (void *)g);
+	/* and let's allow comments by default */
+	yajl_config(hand, yajl_allow_comments, 1);
+
+
+	for (;;) {
+		rd = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
+
+		if (rd == 0) {
+			if (!feof(fp)) {
+				fprintf(stderr, "error on file read.\n");
+				retval = 1;
+			}
+			break;
+		}
+		fileData[rd] = 0;
+
+		stat = yajl_parse(hand, fileData, rd);
+
+		if (stat != yajl_status_ok)
+			break;
+
+		{
+			const unsigned char *buf;
+			size_t		len;
+
+			yajl_gen_get_buf(g, &buf, &len);
+			Dbg("Handing off");
+			parse_handoff(buf, len);
+			yajl_gen_clear(g);
+		}
+	}
+
+	stat = yajl_complete_parse(hand);
+
+	if (stat != yajl_status_ok) {
+		unsigned char  *str = yajl_get_error(hand, 1, fileData, rd);
+		fprintf(stderr, "%s", (const char *)str);
+		yajl_free_error(hand, str);
+		retval = 1;
+	}
+	yajl_gen_free(g);
+	yajl_free(hand);
+	fclose(fp);
+}
+
 
 int
 main(int argc, char *argv[])
 {
 	char           *filepath;
-	char colour_arg[] = "-c";
-	char msg_usage[] =
-		"Usage:\n" 
-		"...\n"
+	char		colour_arg[] = "-c";
+	char		msg_warn[] =
+		"\n"
+		"NOTE: CURRENTLY STILL IN DEVELOPMENT\n"
+		"Do not use.\n"
+		"\n";
+
+	char		msg_usage [] =
+		"______________\n"
+		"pinboard-shell\n"
+		"______________\n"
+		"\n"
+		"Usage:\n"
+		"-o output\n"
+		"-c test colours\n"
+		"-g get updated JSON file\n"
+		"-t test JSON parser on already downloaded file\n"
+		"-d turn debug mode on\n"
+		"-u username arg\n"
+		"-p password arg\n"
 		"\n";
 
 	error_mode = 's';	/* Makes Stopif use abort() */
@@ -496,64 +676,105 @@ main(int argc, char *argv[])
 		}
 	*/
 
-	/* getopt loop -- http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
+	/*
+	 * getopt loop --
+	 * http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.htm
+	 * l
+	 */
 
-    int c;
-    int errflg = 0;
-	int exitflg = 0;
-    char *opt_username = NULL;
-    char *opt_password = NULL;
-    extern char *optarg;
-    extern int optind, optopt;
+	int		c;
+	int		errflg = 0;
+	int		exitflg = 0;
+	int		opt_remote = 0;
+	int		opt_download = 0;
+	int		opt_test = 0;
+	int		opt_output = 0;
+	int		opt_warn = 1;
+	char           *opt_username = NULL;
+	char           *opt_password = NULL;
+	char           *opt_verb = NULL;
+	extern char    *optarg;
+	extern int	optind, optopt;
 
-    while ((c = getopt(argc, argv, ":dcu:p:")) != -1) {
-        switch(c) {
-        case 'd':
-			puts("Debug mode on");
-			error_mode = 's'; /* Makes Stopif use abort() */
-            break;
-		case 'c':
-			puts("Checking colours");
-			exitflg++;
-			test_colours();
+	if (argc == 1) {
+		fprintf(stderr, "%s", msg_usage);
+		return 2;
+	}
+
+	while ((c = getopt(argc, argv, ":wgtdcu:p:o")) != -1) {
+		switch (c) {
+		case 'w':
+			opt_warn = 0;
 			break;
-        case 'u':
-			/* TODO: at each asprintf check size of input and return value */
+		case 'g':
+			opt_remote++;
+			opt_download++;
+			break;
+		case 'o': /* argument to -o is API verb */
+			opt_output++;
+			break;
+		case 't':
+			opt_remote = 0;
+			opt_test++;	
+			break;
+		case 'd':
+			opt_debug++;
+			Dbg("Debug mode on");
+			error_mode = 's';	/* Makes Stopif use abort() */
+			break;
+		case 'c':
+			test_colours();
+			exitflg++;
+			break;
+		case 'u':
+			/*
+			 * TODO: at each asprintf check size of input and
+			 * return value
+			 */
 			asprintf(&opt_username, "%s", optarg);
-            break;
-        case 'p':
+			break;
+		case 'p':
 			asprintf(&opt_password, "%s", optarg);
-            break;
-		case ':':       /* -u or -p without operand */
+			break;
+		case ':':	/* -u or -p without operand */
 			fprintf(stderr, "Option -%c requires an operand\n", optopt);
 			errflg++;
 			break;
-        case '?':
+		case '?':
 			fprintf(stderr, "Unrecognized option: -%c\n", optopt);
-            errflg++;
-        }
-    }
-    if (errflg) {
-        fprintf(stderr, "%s", msg_usage); 
-        return 2;
-    }
-
-	if (exitflg) /* We have executed check function, so quit */
+			errflg++;
+		}
+	}
+	if (errflg) {
+		fprintf(stderr, "%s", msg_usage);
+		return 2;
+	}
+	if (exitflg)		/* We have executed check function, so quit */
 		return 0;
 
-	if (opt_username && opt_password)
-	Print("Using:\n"
-			"%s as username\n"
-			"%s as password", opt_username, opt_password);
-	
+	if (opt_username && opt_password) {
+		Print("Using:\n"
+		      "%s as username\n"
+		      "%s as password", opt_username, opt_password);
+
+	} else
+		if (opt_remote && (!opt_username || !opt_password))	{
+			Se("You need to supply both a username and password");
+			return -1;
+		}
+
+	if (opt_warn)
+		puts(msg_warn);
+
 	/*
 	 * Steps > See if JSON file exists and is not old > If not, download
 	 * with libcurl > Parse > Output > Other functions if required
 	 */
 
+	/* Look in ~/.pinboard and check we can write to it */
+
 	asprintf(&filepath, "%s/%s", getenv("HOME"), ".pinboard");
-	puts("Looking in:");
-	puts(filepath);
+	Dbg("Looking in %s", filepath);
 	check_dir(filepath);
 	free(filepath);
 
@@ -561,19 +782,32 @@ main(int argc, char *argv[])
 
 	/* Download the JSON data */
 
-	/*
-	char *url;
-	asprintf(&url, "http://%s:%s@api.pinboard.in/v1/posts/all&format=json", opt_username, opt_password); 
-	check_file(filepath);
+	if (opt_download) {	
+		char *url;
+		asprintf(&url, "http://%s:%s@api.pinboard.in/v1/posts/all&format=json", opt_username, opt_password);
+		/* TODO: check update time */
+			
+		if (!remove(filepath))
+			Print("Deleted %s", filepath);
 
-	Print("Using:\n"
-			"%s as filepath\n"
-			"%s as URL", filepath, url);
-	
-	curl_grab(url, filepath);
-	*/
+		make_file(filepath);
 
-	read_json(filepath);
+		Print("Using:\n"
+				"%s as filepath\n"
+				"%s as URL", filepath, url);
+
+		curl_grab(url, filepath);
+	}
+
+	if (opt_test) {
+		Dbg("Pretty output");
+		pretty_json_output(filepath);
+	}
+
+	if (opt_output) {
+		Dbg("Output");
+		output(filepath);
+	}
 
 	free(filepath);
 	return 0;
