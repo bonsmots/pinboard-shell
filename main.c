@@ -1,31 +1,34 @@
 /*
- * This software makes use of the YAJL library, which is released under the ISC license
+ * BUGS: '^' is used as a delimiter so this character in any input will mess
+ * up the parsing
  */
 
 /*
- * Copyright (c) 2007-2014, Lloyd Hilaiel <me@lloyd.io>
- *
+ * This software makes use of the YAJL library, which is released under the
+ * ISC license. More info on YAJL can be found at
+ * <https://github.com/lloyd/yajl>
+ */
+
+/*
+ * YAJL library Copyright (c) 2007-2014, Lloyd Hilaiel <me@lloyd.io>
+ * 
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
- *
- * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
- * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+ * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
  * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
  * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
- * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
- * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR
+ * IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 /*
- * YAJL needs cmake to build
- * cd yayl/
- * ./configure
- * make
- *
- * -I yajl/build/yajl-2.1.1/include
- * -L yajl/build/yajl-2.1.1/lib
+ * YAJL needs cmake to build cd yayl/ ./configure make
+ * 
+ * -I yajl/build/yajl-2.1.1/include -L yajl/build/yajl-2.1.1/lib
  */
 
 #include "yajl/yajl_parse.h"
@@ -45,6 +48,7 @@
 #define Dbg(...) \
 { \
 	if (opt_debug) { \
+	fprintf(stderr, "Debug message: "); \
 	fprintf(stderr, __VA_ARGS__); \
 	fprintf(stderr, "\n"); \
 	} \
@@ -66,6 +70,16 @@
 { \
 	fprintf(stdout, __VA_ARGS__); \
 	fprintf(stdout, "\n"); \
+}
+
+#define Charrep(f, r, string, len) \
+{ \
+	char *pointer = string; \
+	for (int j = 0; j < len; j++) { \
+		if (*pointer == f) \
+			*pointer = r; \
+		pointer++; \
+	} \
 }
 
 /*
@@ -90,34 +104,34 @@ if (assertion) \
  * Option globals
  */
 
-int opt_debug = 0;
+int		opt_debug = 0;
 
 /*
  * YAJL callbacks
  */
 
-static int 
+static int
 reformat_null(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_null(g);
 }
 
-static int 
+static int
 reformat_boolean(void *ctx, int boolean)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_bool(g, boolean);
 }
 
-static int 
+static int
 reformat_number(void *ctx, const char *s, size_t l)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_number(g, s, l);
 }
 
-static int 
+static int
 reformat_string(void *ctx, const unsigned char *stringVal,
 		size_t stringLen)
 {
@@ -125,7 +139,7 @@ reformat_string(void *ctx, const unsigned char *stringVal,
 	return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
 }
 
-static int 
+static int
 reformat_map_key(void *ctx, const unsigned char *stringVal,
 		 size_t stringLen)
 {
@@ -133,7 +147,7 @@ reformat_map_key(void *ctx, const unsigned char *stringVal,
 	return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
 }
 
-static int 
+static int
 reformat_start_map(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
@@ -141,21 +155,21 @@ reformat_start_map(void *ctx)
 }
 
 
-static int 
+static int
 reformat_end_map(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_map_close(g);
 }
 
-static int 
+static int
 reformat_start_array(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_array_open(g);
 }
 
-static int 
+static int
 reformat_end_array(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
@@ -176,11 +190,16 @@ static yajl_callbacks callbacks = {
 	reformat_end_array
 };
 
+/* Struct to hold tag and value pairs from the JSON */
+
+typedef struct {
+	char           *tag;
+	char           *value;
+}		pair;
+
 /*
- * > Does the folder exist?
- * > No: create
- * > Yes with wrong permissions: fatal complain
- * > Yes with right permissions: continue
+ * > Does the folder exist? > No: create > Yes with wrong permissions: fatal
+ * complain > Yes with right permissions: continue
  */
 
 int
@@ -199,10 +218,9 @@ check_dir(char *dirpath)
 		Dbg("Making folder %s", dirpath);
 		status = mkdir(dirpath, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		/*
-		 * S_IRWXU read, write, execute/search by owner
-		 * S_IRWXG read, write, execute/search by group
-		 * S_IROTH read permission, others
-		 * S_IXOTH execute/search permission, others
+		 * S_IRWXU read, write, execute/search by owner S_IRWXG read,
+		 * write, execute/search by group S_IROTH read permission,
+		 * others S_IXOTH execute/search permission, others
 		 */
 		Stopif(status != 0, return -1, "Make folder %s failed.", dirpath);
 	}
@@ -220,14 +238,12 @@ check_dir(char *dirpath)
 	return 0;
 }
 
-int 
+int
 make_file(char *filepath)
 {
 	/*
-	 * > Does the file exist?
-	 * > No: create
-	 * > Yes with wrong permissions: fatal complain
-	 * > Yes with right permissions: continue
+	 * > Does the file exist? > No: create > Yes with wrong permissions:
+	 * fatal complain > Yes with right permissions: continue
 	 */
 
 	struct stat	buffer;
@@ -244,13 +260,10 @@ make_file(char *filepath)
 		fildes = open(filepath, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
 		/*
-		 * O_WRONLY write only
-		 * O_CREAT create
-		 * O_EXCL fail if file exists
-		 * S_IRUSR read permission, owner
-		 * S_IWUSR write permission, owner
-		 * S_IRGRP read permission, group
-		 * S_IROTH read permission, others
+		 * O_WRONLY write only O_CREAT create O_EXCL fail if file
+		 * exists S_IRUSR read permission, owner S_IWUSR write
+		 * permission, owner S_IRGRP read permission, group S_IROTH
+		 * read permission, others
 		 */
 
 		Stopif(fildes == -1, return -1, "Open file %s for writing has failed.", filepath);
@@ -268,6 +281,8 @@ make_file(char *filepath)
 	}
 
 	close(fildes);
+
+	return 0;
 }
 
 int
@@ -323,7 +338,7 @@ test_colours()
 /* From example at http://curl.haxx.se/libcurl/c/simple.html */
 /* TODO: add check for 401 response */
 
-int 
+int
 curl_grab(char *url, char *filepath)
 {
 	CURL           *curl;
@@ -361,7 +376,7 @@ curl_grab(char *url, char *filepath)
 
 /* From example at http://curl.haxx.se/libcurl/c/simplessl.html */
 
-int 
+int
 curl_grab_ssl(char *url, char *buffer_file)
 {
 	int		i;
@@ -462,7 +477,7 @@ curl_grab_ssl(char *url, char *buffer_file)
 	return 0;
 }
 
-int 
+int
 pretty_json_output(char *filename)
 {
 	yajl_handle	hand;
@@ -472,7 +487,6 @@ pretty_json_output(char *filename)
 	yajl_status	stat;
 	size_t		rd;
 	int		retval = 0;
-	int		a = 1;
 	FILE           *fp;
 
 	fp = fopen(filename, "r");
@@ -527,48 +541,127 @@ pretty_json_output(char *filename)
 	yajl_gen_free(g);
 	yajl_free(hand);
 	fclose(fp);
+	return 0;
 }
 
-int parse_handoff(unsigned char *buf, size_t len)
+
+int 
+parse_handoff(unsigned char *buf, size_t len)
 {
-	char *loc = NULL;
-	bool between_quotes = 0;
-	int between_quotes_n = 0;
+	/*
+	 * buf of size len is provided from YAJL and then passed in via
+	 * argument
+	 */
+
+	char           *loc = NULL;
+	bool		between_quotes = 0;
+	int		between_quotes_n = 0;
+	char		out_buffer[len + 1];
+	char           *out = out_buffer;
+	char           *spare = out_buffer;
+	char		sep = 94;
+
+	/* Zero our output buffer */
+	for (int j = 0; j < len; j++) {
+		*spare = '\0';
+		spare++;
+	}
+
+	spare = out;
 
 	loc = buf;
 
-	Dbg("Len is %i", len);
+	Dbg("Len is %zu", len);
 
-	for (int j = 0; j < len; j++)
-	{
-		if (*loc == '"')
-		{
+	/*
+	 * The below removes everyting except tag and value, adding a colon
+	 * between the two by way of delimiter
+	 */
+
+	for (int j = 0; j < len; j++) {
+		if (*loc == '"') {
 			between_quotes = !between_quotes;
 
-			if (between_quotes) 
+			if (between_quotes)
 				between_quotes_n++;
 
-			if (!between_quotes)
-			{
-				if ((between_quotes_n % 2) == 0) /* If even */
-					fputc('\n', stdout);
-				else
-					fputc(':', stdout);
+			if (!between_quotes) {
+				/*
+				 * Hack to avoid empty fields and have a
+				 * space instead
+				 */
+				if (*(out - 1) == sep) {
+					*out = ' ';
+					out++;
+				}
+				*out = sep;
+				out++;
 			}
-		} else {	
-			if (between_quotes)
-				fputc(*loc, stdout);
+		} else {
+			if (between_quotes) {
+				*out = *loc;
+				out++;
+			}
 		}
 
 		loc++;
 	}
 
-	putc('\n', stdout);
+	/* out_buffer now contains all our buffer to tokenise */
+	Dbg("Pre tokenising:");
+	Dbg("%s", spare);
+
+	char           *cp = NULL;
+	char           *dp = NULL;
+	char		tokens    [] = {sep, '\0'};
+	pair		pairs     [between_quotes_n];	/* TODO: Think this is
+							 * twice as big as
+							 * needed */
+	int		count = 0;
+	bool		tag = true;
+
+	cp = strtok(spare, tokens);
+
+	/* TODO: remove strtok as depreciated */
+	while (1) {
+		if (cp == NULL)
+			break;
+
+		dp = strdup(cp);
+		if (dp == NULL) {
+			Ftl("Failed strdup");
+		}
+		if (tag) {
+			pairs[count].tag = dp;
+		} else {
+			pairs[count].value = dp;
+			count++;
+		}
+
+		tag = !tag;	/* Toggle tag and value */
+		cp = strtok(NULL, tokens);
+	}
+
+	Dbg("Post tokenising:");
+	for (int j = 0; j < count; j++) {
+		if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags")) {
+			//Charrep(f, r, string, len)
+				// Charrep('\n', '\0', pairs[j].tag, strlen(pairs[j].tag));
+			//Charrep('\n', '\0', pairs[j].value, strlen(pairs[j].value));
+			printf("%s:%s\n", pairs[j].tag, pairs[j].value);
+			putchar('\n');
+		}
+	}
+
+	for (int j = 0; j < count; j++) {
+		free(pairs[j].tag);
+		free(pairs[j].value);
+	}
 
 	return 0;
 }
 
-int 
+int
 output(char *filename)
 {
 	yajl_handle	hand;
@@ -584,7 +677,8 @@ output(char *filename)
 	fp = fopen(filename, "r");
 	if (!fp)
 		return -1;
-	else Dbg("Output open suceeded");
+	else
+		Dbg("Output open suceeded");
 
 	g = yajl_gen_alloc(NULL);
 	yajl_gen_config(g, yajl_gen_beautify, 1);
@@ -643,38 +737,34 @@ main(int argc, char *argv[])
 {
 	char           *filepath;
 	char		colour_arg[] = "-c";
-	char		msg_warn[] =
-		"\n"
-		"NOTE: CURRENTLY STILL IN DEVELOPMENT\n"
-		"Do not use.\n"
-		"\n";
+	char		msg_warn  [] =
+	"\n"
+	"NOTE: CURRENTLY STILL IN DEVELOPMENT\n"
+	"Do not use.\n"
+	"\n";
 
 	char		msg_usage [] =
-		"______________\n"
-		"pinboard-shell\n"
-		"______________\n"
-		"\n"
-		"Usage:\n"
-		"-o output\n"
-		"-c test colours\n"
-		"-g get updated JSON file\n"
-		"-t test JSON parser on already downloaded file\n"
-		"-d turn debug mode on\n"
-		"-u username arg\n"
-		"-p password arg\n"
-		"\n";
+	"______________\n"
+	"pinboard-shell\n"
+	"______________\n"
+	"\n"
+	"Usage:\n"
+	"-o output\n"
+	"-c test colours\n"
+	"-g get updated JSON file\n"
+	"-t test JSON parser on already downloaded file\n"
+	"-d turn debug mode on\n"
+	"-u username arg\n"
+	"-p password arg\n"
+	"\n";
 
 	error_mode = 's';	/* Makes Stopif use abort() */
 
 	/* Quick and dirty arg check */
 	/*
-	for (int j = 0; j < argc; j++)
-		if (strstr(argv[j], colour_arg) != NULL)
-		{
-			test_colours();
-			return 0;
-		}
-	*/
+	 * for (int j = 0; j < argc; j++) if (strstr(argv[j], colour_arg) !=
+	 * NULL) { test_colours(); return 0; }
+	 */
 
 	/*
 	 * getopt loop --
@@ -700,7 +790,6 @@ main(int argc, char *argv[])
 		fprintf(stderr, "%s", msg_usage);
 		return 2;
 	}
-
 	while ((c = getopt(argc, argv, ":wgtdcu:p:o")) != -1) {
 		switch (c) {
 		case 'w':
@@ -710,12 +799,12 @@ main(int argc, char *argv[])
 			opt_remote++;
 			opt_download++;
 			break;
-		case 'o': /* argument to -o is API verb */
+		case 'o':	/* TODO: make argument to an API verb? */
 			opt_output++;
 			break;
 		case 't':
 			opt_remote = 0;
-			opt_test++;	
+			opt_test++;
 			break;
 		case 'd':
 			opt_debug++;
@@ -757,12 +846,10 @@ main(int argc, char *argv[])
 		      "%s as username\n"
 		      "%s as password", opt_username, opt_password);
 
-	} else
-		if (opt_remote && (!opt_username || !opt_password))	{
-			Se("You need to supply both a username and password");
-			return -1;
-		}
-
+	} else if (opt_remote && (!opt_username || !opt_password)) {
+		Se("You need to supply both a username and password");
+		return -1;
+	}
 	if (opt_warn)
 		puts(msg_warn);
 
@@ -782,33 +869,30 @@ main(int argc, char *argv[])
 
 	/* Download the JSON data */
 
-	if (opt_download) {	
-		char *url;
+	if (opt_download) {
+		char           *url;
 		asprintf(&url, "http://%s:%s@api.pinboard.in/v1/posts/all&format=json", opt_username, opt_password);
 		/* TODO: check update time */
-			
+
 		if (!remove(filepath))
 			Print("Deleted %s", filepath);
 
 		make_file(filepath);
 
 		Print("Using:\n"
-				"%s as filepath\n"
-				"%s as URL", filepath, url);
+		      "%s as filepath\n"
+		      "%s as URL", filepath, url);
 
 		curl_grab(url, filepath);
 	}
-
 	if (opt_test) {
 		Dbg("Pretty output");
 		pretty_json_output(filepath);
 	}
-
 	if (opt_output) {
 		Dbg("Output");
 		output(filepath);
 	}
-
 	free(filepath);
 	return 0;
 }
