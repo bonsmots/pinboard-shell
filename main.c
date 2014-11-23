@@ -1,6 +1,44 @@
 /*
  * BUGS: '^' is used as a delimiter so this character in any input will mess
- * up the parsing
+ * up the parsing TODO: search for ^ and replace with something else before
+ * parsing, then replace back
+ */
+
+/*
+ * libcurl
+ */
+
+/*
+ * This source code makes use of the libcurl library, which is released under
+ * a a MIT/X derivative license. More info on YAJL can be found at
+ * <http://curl.haxx.se/libcurl/>
+ */
+
+/*
+ * libcurl copyright (c) 1996 - 2014, Daniel Stenberg, daniel@haxx.se.
+ * 
+ * All rights reserved.
+ * 
+ * Permission to use, copy, modify, and distribute this software for any purpose
+ * with or without fee is hereby granted, provided that the above copyright
+ * notice and this permission notice appear in all copies.
+ * 
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY
+ * RIGHTS. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+ * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+ * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ * 
+ * Except as contained in this notice, the name of a copyright holder shall not
+ * be used in advertising or otherwise to promote the sale, use or other
+ * dealings in this Software without prior written authorization of the
+ * copyright holder.
+ */
+
+/*
+ * YAJL
  */
 
 /*
@@ -54,6 +92,14 @@
 	} \
 }
 
+#define Dbgnl(...) \
+{ \
+	if (opt_debug) { \
+	fprintf(stderr, "Debug message: "); \
+	fprintf(stderr, __VA_ARGS__); \
+	} \
+}
+
 #define Se(...) \
 { \
 	fprintf(stderr, __VA_ARGS__); \
@@ -80,6 +126,34 @@
 			*pointer = r; \
 		pointer++; \
 	} \
+}
+
+#define Null_bookmarks(array, items) \
+{ \
+	for (int counter = 0; counter < items; counter++) { \
+		array[counter].hash = NULL;\
+		array[counter].href = NULL;\
+		array[counter].desc = NULL;\
+		array[counter].tags = NULL;\
+	}\
+}
+
+// Not elegent.Should also add reset.
+char           *clr[] =
+{
+	"\e[0;34m", //+
+	"\e[0;36m", //+
+	"\e[0;35m", //+
+	"\e[1;37m" // +
+};
+
+int 
+strval(char *str)
+{
+	if (str)
+		return strlen(str);
+	else
+		return 0;
 }
 
 /*
@@ -197,6 +271,12 @@ typedef struct {
 	char           *value;
 }		pair;
 
+typedef struct {
+	char           *hash;
+	char           *href;
+	char           *desc;
+	char           *tags;
+}		bookmark;
 /*
  * > Does the folder exist? > No: create > Yes with wrong permissions: fatal
  * complain > Yes with right permissions: continue
@@ -292,11 +372,11 @@ test_colours()
 	char           *colours[] =
 	{
 		"\e[0;30m",
-		"\e[0;34m",
+		"\e[0;34m", //+
 		"\e[0;32m",
-		"\e[0;36m",
+		"\e[0;36m", //+
 		"\e[0;31m",
-		"\e[0;35m",
+		"\e[0;35m", //+
 		"\e[0;33m",
 		"\e[0;37m",
 		"\e[1;30m",
@@ -306,7 +386,7 @@ test_colours()
 		"\e[1;31m",
 		"\e[1;35m",
 		"\e[1;33m",
-		"\e[1;37m"
+		"\e[1;37m" // +
 	};
 
 	char           *colour_labels[] =
@@ -545,7 +625,7 @@ pretty_json_output(char *filename)
 }
 
 
-int 
+int
 parse_handoff(unsigned char *buf, size_t len)
 {
 	/*
@@ -614,13 +694,18 @@ parse_handoff(unsigned char *buf, size_t len)
 	char           *cp = NULL;
 	char           *dp = NULL;
 	char		tokens    [] = {sep, '\0'};
-	pair		pairs     [between_quotes_n];	/* TODO: Think this is
-							 * twice as big as
-							 * needed */
-	int		count = 0;
+	pair		pairs     [between_quotes_n];
+	//2 x as big as needed ? Not worried as essentially a buffer value
+		bookmark bm[between_quotes_n];
+	//Same comment
+		int		count = 0;
+	int		bm_count = 0;
+	int		i = 0;
 	bool		tag = true;
+	bool		colour = true;
 
 	cp = strtok(spare, tokens);
+	Null_bookmarks(bm, between_quotes_n);
 
 	/* TODO: remove strtok as depreciated */
 	while (1) {
@@ -644,14 +729,41 @@ parse_handoff(unsigned char *buf, size_t len)
 
 	Dbg("Post tokenising:");
 	for (int j = 0; j < count; j++) {
-		if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags")) {
-			//Charrep(f, r, string, len)
-				// Charrep('\n', '\0', pairs[j].tag, strlen(pairs[j].tag));
-			//Charrep('\n', '\0', pairs[j].value, strlen(pairs[j].value));
-			printf("%s:%s\n", pairs[j].tag, pairs[j].value);
-			putchar('\n');
+		if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags") || strstr(pairs[j].tag, "hash")) {
+			Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
+
+			//Put the values in
+				if (strstr(pairs[j].tag, "hash"))
+				bm[i].hash = pairs[j].value;
+			if (strstr(pairs[j].tag, "href"))
+				bm[i].href = pairs[j].value;
+			if (strstr(pairs[j].tag, "description"))
+				bm[i].desc = pairs[j].value;
+			if (strstr(pairs[j].tag, "tags"))
+				bm[i].tags = pairs[j].value;
+
+			if (strval(bm[i].hash) && strval(bm[i].href) && strval(bm[i].desc) && strval(bm[i].tags)) {
+				i++;
+				bm_count++;
+			}
 		}
 	}
+
+	Dbg("In bookmark array:");
+	for (int j = 0; j < bm_count; j++) {
+		printf("%s", clr[0]);
+		printf("%s\n", bm[j].hash);
+		printf("%s", clr[2]);
+		printf("%s\n", bm[j].desc);
+		printf("%s", clr[3]);
+		printf("%s\n", bm[j].tags);
+		printf("%s", clr[1]);
+		printf("%s", bm[j].href);
+		putchar('\n');
+		putchar('\n');
+	}
+
+	/* Free bookmarks */
 
 	for (int j = 0; j < count; j++) {
 		free(pairs[j].tag);
