@@ -16,13 +16,13 @@
 
 /*
  * libcurl copyright (c) 1996 - 2014, Daniel Stenberg, daniel@haxx.se.
- * 
+ *
  * All rights reserved.
- * 
+ *
  * Permission to use, copy, modify, and distribute this software for any purpose
  * with or without fee is hereby granted, provided that the above copyright
  * notice and this permission notice appear in all copies.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY
@@ -30,7 +30,7 @@
  * ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
  * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
  * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * 
+ *
  * Except as contained in this notice, the name of a copyright holder shall not
  * be used in advertising or otherwise to promote the sale, use or other
  * dealings in this Software without prior written authorization of the
@@ -49,11 +49,11 @@
 
 /*
  * YAJL library Copyright (c) 2007-2014, Lloyd Hilaiel <me@lloyd.io>
- * 
+ *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
  * copyright notice and this permission notice appear in all copies.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
  * REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
@@ -65,7 +65,7 @@
 
 /*
  * YAJL needs cmake to build cd yayl/ ./configure make
- * 
+ *
  * -I yajl/build/yajl-2.1.1/include -L yajl/build/yajl-2.1.1/lib
  */
 
@@ -82,6 +82,7 @@
 #include <unistd.h> // close, getopt
 #include <string.h> // strstr
 #include <stdbool.h> // C99 advancedness
+#include <time.h>
 
 #define Dbg(...) \
 { \
@@ -97,6 +98,15 @@
 	if (opt_debug) { \
 	fprintf(stderr, "Debug message: "); \
 	fprintf(stderr, __VA_ARGS__); \
+	} \
+}
+
+#define V(...) \
+{ \
+	if (opt_verbose) { \
+	fprintf(stderr, "Verbose message: "); \
+	fprintf(stderr, __VA_ARGS__); \
+	fprintf(stderr, "\n"); \
 	} \
 }
 
@@ -147,7 +157,7 @@ char           *clr[] =
 	"\e[1;37m" // +
 };
 
-int 
+int
 strval(char *str)
 {
 	if (str)
@@ -179,6 +189,7 @@ if (assertion) \
  */
 
 int		opt_debug = 0;
+bool		opt_verbose = true;
 
 /*
  * YAJL callbacks
@@ -558,7 +569,29 @@ curl_grab_ssl(char *url, char *buffer_file)
 }
 
 int
-pretty_json_output(char *filename)
+simple_output(char *filedir, char *verb)
+{
+	char           *filename;
+	char		buf;
+	int		fd;
+
+	asprintf(&filename, "%s/%s.json", filedir, verb);
+
+	fd = open(filename, O_RDONLY);
+	if (!fd)
+		return -1;
+
+	while (read(fd, &buf, 1))
+		putchar(buf);
+
+	close(fd);
+	free(filename);
+
+	return 0;
+}
+
+int
+pretty_json_output(char *filedir, char *verb)
 {
 	yajl_handle	hand;
 	static unsigned char fileData[65536];
@@ -568,6 +601,9 @@ pretty_json_output(char *filename)
 	size_t		rd;
 	int		retval = 0;
 	FILE           *fp;
+	char           *filename;
+
+	asprintf(&filename, "%s/%s.json", filedir, verb);
 
 	fp = fopen(filename, "r");
 	if (!fp)
@@ -621,6 +657,8 @@ pretty_json_output(char *filename)
 	yajl_gen_free(g);
 	yajl_free(hand);
 	fclose(fp);
+
+	free(filename);
 	return 0;
 }
 
@@ -633,7 +671,7 @@ parse_handoff(unsigned char *buf, size_t len)
 	 * argument
 	 */
 
-	char           *loc = NULL;
+	unsigned char  *loc = NULL;
 	bool		between_quotes = 0;
 	int		between_quotes_n = 0;
 	char		out_buffer[len + 1];
@@ -654,7 +692,7 @@ parse_handoff(unsigned char *buf, size_t len)
 	Dbg("Len is %zu", len);
 
 	/*
-	 * The below removes everyting except tag and value, adding a colon
+	 * The below removes everyting except tag and value, adding sep
 	 * between the two by way of delimiter
 	 */
 
@@ -702,7 +740,6 @@ parse_handoff(unsigned char *buf, size_t len)
 	int		bm_count = 0;
 	int		i = 0;
 	bool		tag = true;
-	bool		colour = true;
 
 	cp = strtok(spare, tokens);
 	Null_bookmarks(bm, between_quotes_n);
@@ -774,7 +811,7 @@ parse_handoff(unsigned char *buf, size_t len)
 }
 
 int
-output(char *filename)
+output(char *filedir, char *verb)
 {
 	yajl_handle	hand;
 	static unsigned char fileData[65536];
@@ -783,8 +820,10 @@ output(char *filename)
 	yajl_status	stat;
 	size_t		rd;
 	int		retval = 0;
-	int		a = 1;
 	FILE           *fp;
+	char           *filename;
+
+	asprintf(&filename, "%s/%s.json", filedir, verb);
 
 	fp = fopen(filename, "r");
 	if (!fp)
@@ -825,13 +864,12 @@ output(char *filename)
 
 			yajl_gen_get_buf(g, &buf, &len);
 			Dbg("Handing off");
-			parse_handoff(buf, len);
+			parse_handoff((unsigned char *)buf, len);
 			yajl_gen_clear(g);
 		}
 	}
 
 	stat = yajl_complete_parse(hand);
-
 	if (stat != yajl_status_ok) {
 		unsigned char  *str = yajl_get_error(hand, 1, fileData, rd);
 		fprintf(stderr, "%s", (const char *)str);
@@ -840,15 +878,162 @@ output(char *filename)
 	}
 	yajl_gen_free(g);
 	yajl_free(hand);
+
+	free(filename);
 	fclose(fp);
+	return 0;
 }
 
+char           *
+file_to_mem(char *directory, char *verb)
+{
+	char           *filepath;
+	struct stat	buffer;
+	int		status;
+	int		fildes;
+	int		bytes_read = 1;
+	char           *data = NULL;
+
+	asprintf(&filepath, "%s/%s.json", directory, verb);
+	V("Opening file %s", filepath);
+
+	fildes = open(filepath, O_RDONLY);
+
+	if (fildes < 0)
+		Ftl("Cannot open %s", filepath);
+
+	status = fstat(fildes, &buffer);
+	close(fildes);
+
+	if (buffer.st_size > 1024) {
+		//If more than a meg something is going wrong, bail
+			Ftl("File is more than a meg which doesn't make sense, bailing");
+	} else {
+		data = malloc(buffer.st_size + 1);
+	}
+
+	fildes = open(filepath, O_RDONLY);
+
+	while (bytes_read > 0)
+		bytes_read = read(fildes, data, buffer.st_size);
+
+	close(fildes);
+
+	free(filepath);
+
+	return data;
+}
+
+void 
+simple_parse_field(int field, char delim, char *data_from, char *data_to, int max)
+{
+	char           *loc, *out;
+	int		loc_count;
+	bool		in_field = false;
+	int		in_field_count = 0;
+
+	loc = data_from;
+	out = data_to;
+
+	for (int j = 0; j < max; j++) {
+		if (*loc == delim) {
+			in_field = !in_field;
+
+			if (in_field)
+				in_field_count++;
+		} else {
+			if (in_field && (in_field_count == field)) {
+				*out = *loc;
+				out++;
+			}
+		}
+
+		loc++;
+	}
+
+	return;
+}
+
+/*
+ * http://www.ioncannon.net/programming/33/using-strptime-to-parse-iso-8601-fo
+ * rmated-timestamps/
+ */
+
+void 
+convert_iso8601(const char *time_string, int ts_len, struct tm *tm_data)
+{
+	tzset();
+
+	char		temp      [64];
+	memset(temp, 0, sizeof(temp));
+	strncpy(temp, time_string, ts_len);
+
+	struct tm	ctime;
+	memset(&ctime, 0, sizeof(struct tm));
+	strptime(temp, "%FT%T%z", &ctime);
+
+	long		ts = mktime(&ctime);
+	localtime_r(&ts, tm_data);
+}
+
+int
+check_update()
+{
+	puts("TODO: check for updates");
+}
+
+int
+api_download(char *verb, char *username, char *password, char *directory)
+{
+	char           *url;
+	char           *filepath;
+
+	asprintf(&url, "http://%s:%s@api.pinboard.in/v1/posts/%s&format=json", username, password, verb);
+	asprintf(&filepath, "%s/%s.json", directory, verb);
+
+	/* TODO: check update time */
+
+	if (!remove(filepath))
+		Print("Deleted %s", filepath);
+
+	make_file(filepath);
+
+	Print("Using:\n"
+	      "%s as filepath\n"
+	      "%s as URL", filepath, url);
+
+	curl_grab(url, filepath);
+	free(url);
+	free(filepath);
+}
+
+int
+devel(char *filepath)
+{
+	char           *d;
+	char		b1        [1024] = {0};
+	struct tm	tms;
+
+	d = file_to_mem(filepath, "update");
+	simple_parse_field(2, '"', d, b1, strlen(d));
+	puts(b1);
+
+	memset(&tms, 0, sizeof(struct tm));
+	convert_iso8601(b1, strlen(b1), &tms);
+
+	char		buf       [128];
+	strftime(buf, sizeof(buf), "Date: %a, %d %b %Y %H:%M:%S %Z", &tms);
+	printf("%s\n", buf);
+
+	free(d);
+
+	return 0;
+}
 
 int
 main(int argc, char *argv[])
 {
 	char           *filepath;
-	char		colour_arg[] = "-c";
 	char		msg_warn  [] =
 	"\n"
 	"NOTE: CURRENTLY STILL IN DEVELOPMENT\n"
@@ -872,12 +1057,6 @@ main(int argc, char *argv[])
 
 	error_mode = 's';	/* Makes Stopif use abort() */
 
-	/* Quick and dirty arg check */
-	/*
-	 * for (int j = 0; j < argc; j++) if (strstr(argv[j], colour_arg) !=
-	 * NULL) { test_colours(); return 0; }
-	 */
-
 	/*
 	 * getopt loop --
 	 * http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.htm
@@ -887,14 +1066,16 @@ main(int argc, char *argv[])
 	int		c;
 	int		errflg = 0;
 	int		exitflg = 0;
-	int		opt_remote = 0;
+	int		ret = 0;
+	bool		opt_remote = false;
 	int		opt_download = 0;
 	int		opt_test = 0;
 	int		opt_output = 0;
 	int		opt_warn = 1;
+	bool		opt_check = 0;
+	bool		opt_devel = true;
 	char           *opt_username = NULL;
 	char           *opt_password = NULL;
-	char           *opt_verb = NULL;
 	extern char    *optarg;
 	extern int	optind, optopt;
 
@@ -902,13 +1083,13 @@ main(int argc, char *argv[])
 		fprintf(stderr, "%s", msg_usage);
 		return 2;
 	}
-	while ((c = getopt(argc, argv, ":wgtdcu:p:o")) != -1) {
+	while ((c = getopt(argc, argv, ":wgotdcsvzu:p:")) != -1) {
 		switch (c) {
 		case 'w':
 			opt_warn = 0;
 			break;
 		case 'g':
-			opt_remote++;
+			opt_remote = true;
 			opt_download++;
 			break;
 		case 'o':	/* TODO: make argument to an API verb? */
@@ -920,7 +1101,6 @@ main(int argc, char *argv[])
 			break;
 		case 'd':
 			opt_debug++;
-			Dbg("Debug mode on");
 			error_mode = 's';	/* Makes Stopif use abort() */
 			break;
 		case 'c':
@@ -928,14 +1108,20 @@ main(int argc, char *argv[])
 			exitflg++;
 			break;
 		case 'u':
-			/*
-			 * TODO: at each asprintf check size of input and
-			 * return value
-			 */
 			asprintf(&opt_username, "%s", optarg);
 			break;
 		case 'p':
 			asprintf(&opt_password, "%s", optarg);
+			break;
+		case 's':
+			opt_check = true;
+			opt_remote = true;
+			break;
+		case 'v':
+			opt_verbose = !opt_verbose;
+			break;
+		case 'z':
+			opt_devel = true;
 			break;
 		case ':':	/* -u or -p without operand */
 			fprintf(stderr, "Option -%c requires an operand\n", optopt);
@@ -950,14 +1136,13 @@ main(int argc, char *argv[])
 		fprintf(stderr, "%s", msg_usage);
 		return 2;
 	}
-	if (exitflg)		/* We have executed check function, so quit */
+	if (exitflg)
 		return 0;
 
 	if (opt_username && opt_password) {
 		Print("Using:\n"
 		      "%s as username\n"
 		      "%s as password", opt_username, opt_password);
-
 	} else if (opt_remote && (!opt_username || !opt_password)) {
 		Se("You need to supply both a username and password");
 		return -1;
@@ -973,38 +1158,31 @@ main(int argc, char *argv[])
 	/* Look in ~/.pinboard and check we can write to it */
 
 	asprintf(&filepath, "%s/%s", getenv("HOME"), ".pinboard");
-	Dbg("Looking in %s", filepath);
+	V("Looking in %s", filepath);
 	check_dir(filepath);
-	free(filepath);
-
-	asprintf(&filepath, "%s/%s", getenv("HOME"), ".pinboard/all.json");
 
 	/* Download the JSON data */
-
 	if (opt_download) {
-		char           *url;
-		asprintf(&url, "http://%s:%s@api.pinboard.in/v1/posts/all&format=json", opt_username, opt_password);
-		/* TODO: check update time */
-
-		if (!remove(filepath))
-			Print("Deleted %s", filepath);
-
-		make_file(filepath);
-
-		Print("Using:\n"
-		      "%s as filepath\n"
-		      "%s as URL", filepath, url);
-
-		curl_grab(url, filepath);
+		//api_download(char *verb, char *username, char *password, char *filepath)
+			api_download("all", opt_username, opt_password, filepath);
+	}
+	if (opt_check) {
+		V("Checking");
+		api_download("update", opt_username, opt_password, filepath);
+		simple_output(filepath, "update");
 	}
 	if (opt_test) {
 		Dbg("Pretty output");
-		pretty_json_output(filepath);
+		pretty_json_output(filepath, "all");
 	}
 	if (opt_output) {
 		Dbg("Output");
-		output(filepath);
+		output(filepath, "all");
+	}
+	if (opt_devel) {
+		devel(filepath);
 	}
 	free(filepath);
-	return 0;
+
+	return ret;
 }
