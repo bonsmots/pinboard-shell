@@ -151,6 +151,7 @@
 // Not elegent.Should also add reset.
 char           *clr[] =
 {
+	"\e[0m", // This is the reset code
 	"\e[0;34m", //+
 	"\e[0;36m", //+
 	"\e[0;35m", //+
@@ -662,7 +663,6 @@ pretty_json_output(char *filedir, char *verb)
 	return 0;
 }
 
-
 int
 parse_handoff(unsigned char *buf, size_t len)
 {
@@ -788,20 +788,22 @@ parse_handoff(unsigned char *buf, size_t len)
 
 	Dbg("In bookmark array:");
 	for (int j = 0; j < bm_count; j++) {
-		printf("%s", clr[0]);
-		printf("%s\n", bm[j].hash);
-		printf("%s", clr[2]);
-		printf("%s\n", bm[j].desc);
-		printf("%s", clr[3]);
-		printf("%s\n", bm[j].tags);
 		printf("%s", clr[1]);
+		printf("%s\n", bm[j].hash);
+		printf("%s", clr[3]);
+		printf("%s\n", bm[j].desc);
+		printf("%s", clr[4]);
+		printf("%s\n", bm[j].tags);
+		printf("%s", clr[2]);
 		printf("%s", bm[j].href);
 		putchar('\n');
 		putchar('\n');
 	}
 
-	/* Free bookmarks */
+	/* Send normal text control sequence */
+	printf("%s", clr[0]);
 
+	/* Free bookmarks */
 	for (int j = 0; j < count; j++) {
 		free(pairs[j].tag);
 		free(pairs[j].value);
@@ -928,7 +930,6 @@ void
 simple_parse_field(int field, char delim, char *data_from, char *data_to, int max)
 {
 	char           *loc, *out;
-	int		loc_count;
 	bool		in_field = false;
 	int		in_field_count = 0;
 
@@ -980,6 +981,7 @@ int
 check_update()
 {
 	puts("TODO: check for updates");
+	return 0;
 }
 
 int
@@ -1005,6 +1007,7 @@ api_download(char *verb, char *username, char *password, char *directory)
 	curl_grab(url, filepath);
 	free(url);
 	free(filepath);
+	return 0;
 }
 
 int
@@ -1050,10 +1053,17 @@ main(int argc, char *argv[])
 	"-o output\n"
 	"-c test colours\n"
 	"-g get updated JSON file\n"
+	"-s get updated JSON file only if newer than current version NOT YET IMPLIMENTED\n"
 	"-t test JSON parser on already downloaded file\n"
 	"-d turn debug mode on\n"
 	"-u username arg\n"
 	"-p password arg\n"
+	"\n"
+	"Example usage:\n"
+	"1. Download bookmarks file from pinboard.in\n"
+	"./main -u $USERNAME -p $PASSWORD -g\n"
+	"2. Output\n"
+	"./main -o\n"
 	"\n";
 
 	error_mode = 's';	/* Makes Stopif use abort() */
@@ -1074,7 +1084,7 @@ main(int argc, char *argv[])
 	int		opt_output = 0;
 	int		opt_warn = 1;
 	bool		opt_check = 0;
-	bool		opt_devel = true;
+	bool		opt_devel = false;
 	char           *opt_username = NULL;
 	char           *opt_password = NULL;
 	extern char    *optarg;
@@ -1084,11 +1094,10 @@ main(int argc, char *argv[])
 		fprintf(stderr, "%s", msg_usage);
 		return 2;
 	}
-	while ((c = getopt(argc, argv, ":wgotdcsvzu:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":wegotdcsvzu:p:")) != -1) {
 		switch (c) {
-		case 'w':
-			opt_warn = 0;
-			break;
+		case 'w': opt_warn = 0; break;
+		case 'e': opt_devel = true; break;
 		case 'g':
 			opt_remote = true;
 			opt_download++;
