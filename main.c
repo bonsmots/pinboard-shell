@@ -786,16 +786,17 @@ parse_handoff(unsigned char *buf, size_t len)
 		}
 	}
 
+	/* Index 0 is normal text control sequence */
 	Dbg("In bookmark array:");
 	for (int j = 0; j < bm_count; j++) {
-		printf("%s", clr[1]);
-		printf("%s\n", bm[j].hash);
-		printf("%s", clr[3]);
-		printf("%s\n", bm[j].desc);
-		printf("%s", clr[4]);
-		printf("%s\n", bm[j].tags);
-		printf("%s", clr[2]);
-		printf("%s", bm[j].href);
+		printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+
+		printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
+
+		printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+
+		printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+
 		putchar('\n');
 		putchar('\n');
 	}
