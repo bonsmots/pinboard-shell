@@ -5,6 +5,10 @@
  */
 
 /*
+ * TODO: if -u specified and -p not, ask for pass on the command line
+ */
+
+/*
  * libcurl
  */
 
@@ -69,9 +73,9 @@
  * -I yajl/build/yajl-2.1.1/include -L yajl/build/yajl-2.1.1/lib
  */
 
-#include "yajl/yajl_parse.h"
-#include "yajl/yajl_gen.h"
-#include "yajl/yajl_tree.h"
+/*
+ * Headers
+ */
 
 #include <stdio.h>
 #include <stdlib.h> //abort, getenv
@@ -79,10 +83,27 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <fcntl.h> // open
-#include <unistd.h> // close, getopt
+#include <unistd.h> // close, getopt, getpass
 #include <string.h> // strstr
 #include <stdbool.h> // C99 advancedness
 #include <time.h>
+
+#include "yajl/yajl_parse.h"
+#include "yajl/yajl_gen.h"
+#include "yajl/yajl_tree.h"
+
+/*
+ * Macros
+ */
+
+#define Trace(...) \
+{ \
+	if (opt_trace) { \
+	fprintf(stdout, "Trace: "); \
+	fprintf(stdout, __VA_ARGS__); \
+	fprintf(stdout, "\n"); \
+	} \
+}
 
 #define Dbg(...) \
 { \
@@ -128,6 +149,7 @@
 	fprintf(stdout, "\n"); \
 }
 
+// Replaces f with r in string
 #define Charrep(f, r, string, len) \
 { \
 	char *pointer = string; \
@@ -138,6 +160,7 @@
 	} \
 }
 
+// Initialise bookmarks array as NULLs
 #define Null_bookmarks(array, items) \
 { \
 	for (int counter = 0; counter < items; counter++) { \
@@ -148,23 +171,31 @@
 	}\
 }
 
-// Not elegent.Should also add reset.
-char           *clr[] =
-{
-	"\e[0m", // This is the reset code
-	"\e[0;34m", //+
-	"\e[0;36m", //+
-	"\e[0;35m", //+
-	"\e[1;37m" // +
-};
+// Zero char buffer
+#define Zero_char(array, items) \
+{ \
+	for (int counter = 0; counter < items; counter++) { \
+		array[counter]= 0;\
+	}\
+}
 
-int
-strval(char *str)
+/*
+ * Helper functions
+ */
+
+// TODO: obviously not secure
+char* ask_string(bool visible, char *message, char *input)
 {
-	if (str)
-		return strlen(str);
-	else
-		return 0;
+	printf("%s", message);
+	scanf("%s", input);
+	return input;
+}
+
+// Returns string length if not NULL
+int strval(char *str)
+{
+	if (str) return strlen(str);
+	else return 0;
 }
 
 /*
@@ -173,9 +204,9 @@ strval(char *str)
 
 /** Set this to \c 's' to stop the program on an error.
  * Otherwise, functions return a value on failure.*/
-char		error_mode;
+char	error_mode;
 /** To where should I write errors? If this is \c NULL, write to \c stderr. */
-FILE           *error_log;
+FILE	*error_log;
 #define Stopif(assertion, error_action, ...) \
 if (assertion) \
 { \
@@ -190,73 +221,92 @@ if (assertion) \
  */
 
 int		opt_debug = 0;
-bool		opt_verbose = true;
+bool	opt_verbose = true;
+bool	opt_trace = true;
 
 /*
- * YAJL callbacks
+ * Other globals
  */
 
-static int
-reformat_null(void *ctx)
+// This is the colour pallete that we use -- the first value is the colour reset
+char *clr[] =
+{
+	"\e[0m", //This is the reset code
+	"\e[0;34m", //+
+	"\e[0;36m", //+
+	"\e[0;35m", //+
+	"\e[1;37m" // +
+};
+
+/* Struct to hold tag and value pairs from the JSON */
+typedef struct {
+	char           *tag;
+	char           *value;
+}	pair;
+
+typedef struct {
+	char           *hash;
+	char           *href;
+	char           *desc;
+	char           *tags;
+}	bookmark;
+
+/*
+ * YAJL callback functions -- these are a lift from the YAJL documentation
+ */
+
+static int reformat_null(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_null(g);
 }
 
-static int
-reformat_boolean(void *ctx, int boolean)
+static int reformat_boolean(void *ctx, int boolean)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_bool(g, boolean);
 }
 
-static int
-reformat_number(void *ctx, const char *s, size_t l)
+static int reformat_number(void *ctx, const char *s, size_t l)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_number(g, s, l);
 }
 
-static int
-reformat_string(void *ctx, const unsigned char *stringVal,
+static int reformat_string(void *ctx, const unsigned char *stringVal,
 		size_t stringLen)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
 }
 
-static int
-reformat_map_key(void *ctx, const unsigned char *stringVal,
+static int reformat_map_key(void *ctx, const unsigned char *stringVal,
 		 size_t stringLen)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
 }
 
-static int
-reformat_start_map(void *ctx)
+static int reformat_start_map(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_map_open(g);
 }
 
 
-static int
-reformat_end_map(void *ctx)
+static int reformat_end_map(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_map_close(g);
 }
 
-static int
-reformat_start_array(void *ctx)
+static int reformat_start_array(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_array_open(g);
 }
 
-static int
-reformat_end_array(void *ctx)
+static int reformat_end_array(void *ctx)
 {
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_array_close(g);
@@ -276,26 +326,8 @@ static yajl_callbacks callbacks = {
 	reformat_end_array
 };
 
-/* Struct to hold tag and value pairs from the JSON */
-
-typedef struct {
-	char           *tag;
-	char           *value;
-}		pair;
-
-typedef struct {
-	char           *hash;
-	char           *href;
-	char           *desc;
-	char           *tags;
-}		bookmark;
-/*
- * > Does the folder exist? > No: create > Yes with wrong permissions: fatal
- * complain > Yes with right permissions: continue
- */
-
-int
-check_dir(char *dirpath)
+// Does directory exist with sensible permissions? If not, create it.
+int check_dir(char *dirpath)
 {
 	struct stat	buffer;
 	int		status;
@@ -330,14 +362,9 @@ check_dir(char *dirpath)
 	return 0;
 }
 
-int
-make_file(char *filepath)
+// Does file exist with sensible permissions? If not, create it.
+int make_file(char *filepath)
 {
-	/*
-	 * > Does the file exist? > No: create > Yes with wrong permissions:
-	 * fatal complain > Yes with right permissions: continue
-	 */
-
 	struct stat	buffer;
 	int		status;
 	int		fildes;
@@ -377,11 +404,11 @@ make_file(char *filepath)
 	return 0;
 }
 
-int
-test_colours()
+// UNUSED
+int test_colours()
 {
 	int		colour_count = 15;
-	char           *colours[] =
+	char	*colours[] =
 	{
 		"\e[0;30m",
 		"\e[0;34m", //+
@@ -429,13 +456,14 @@ test_colours()
 
 /* From example at http://curl.haxx.se/libcurl/c/simple.html */
 /* TODO: add check for 401 response */
-
-int
-curl_grab(char *url, char *filepath)
+/* TODO: set username and pass via curl opts */
+// Pulls file at URL using CURL, writes to filepath
+int curl_grab(char *url, char *filepath)
 {
-	CURL           *curl;
+	CURL		*curl;
 	CURLcode	res;
-	FILE           *fp;
+	FILE		*fp;
+	bool		curl_success;
 
 	fp = fopen(filepath, "w");
 	if (!fp)
@@ -443,34 +471,29 @@ curl_grab(char *url, char *filepath)
 
 	curl = curl_easy_init();
 	if (curl) {
+		curl_success = true;
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
-		/*
-		 * example.com is redirected, so we tell libcurl to follow
-		 * redirection
-		 */
-		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect
+		res = curl_easy_perform(curl); /* Perform the request, res will get the return code */
 
-		/* Perform the request, res will get the return code */
-		res = curl_easy_perform(curl);
-		/* Check for errors */
-		if (res != CURLE_OK)
-			fprintf(stderr, "curl_easy_perform() failed: %s\n",
-				curl_easy_strerror(res));
+		if (res != CURLE_OK)								   /* Check for errors */
+			fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 
-		/* always cleanup */
-		curl_easy_cleanup(curl);
-	}
+		curl_easy_cleanup(curl); /* always cleanup */
+	} else curl_success = false;
+
 	fclose(fp);
 
-	return 0;
+	if (curl_success) return 0;
+	else return -1;
 }
 
-int
-simple_output(char *filedir, char *verb)
+// Crudely prints file to stdout
+int simple_output(char *filedir, char *verb)
 {
-	char           *filename;
-	char		buf;
+	char	*filename;
+	char	buf;
 	int		fd;
 
 	asprintf(&filename, "%s/%s.json", filedir, verb);
@@ -488,18 +511,18 @@ simple_output(char *filedir, char *verb)
 	return 0;
 }
 
-int
-pretty_json_output(char *filedir, char *verb)
+// Outputs file to stdout, nicely formatted
+int pretty_json_output(char *filedir, char *verb)
 {
-	yajl_handle	hand;
+	yajl_handle		hand;
 	static unsigned char fileData[65536];
 	/* generator config */
-	yajl_gen	g;
-	yajl_status	stat;
-	size_t		rd;
-	int		retval = 0;
-	FILE           *fp;
-	char           *filename;
+	yajl_gen		g;
+	yajl_status		stat;
+	size_t			rd;
+	int				retval = 0;
+	FILE			*fp;
+	char			*filename;
 
 	asprintf(&filename, "%s/%s.json", filedir, verb);
 
@@ -515,7 +538,6 @@ pretty_json_output(char *filedir, char *verb)
 	hand = yajl_alloc(&callbacks, NULL, (void *)g);
 	/* and let's allow comments by default */
 	yajl_config(hand, yajl_allow_comments, 1);
-
 
 	for (;;) {
 		rd = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
@@ -552,6 +574,7 @@ pretty_json_output(char *filedir, char *verb)
 		yajl_free_error(hand, str);
 		retval = 1;
 	}
+
 	yajl_gen_free(g);
 	yajl_free(hand);
 	fclose(fp);
@@ -560,21 +583,23 @@ pretty_json_output(char *filedir, char *verb)
 	return 0;
 }
 
-int
-parse_handoff(unsigned char *buf, size_t len)
+int parse_handoff(unsigned char *buf, size_t len)
 {
 	/*
 	 * buf of size len is provided from YAJL and then passed in via
 	 * argument
 	 */
 
-	unsigned char  *loc = NULL;
-	bool		between_quotes = 0;
-	int		between_quotes_n = 0;
-	char		out_buffer[len + 1];
-	char           *out = out_buffer;
-	char           *spare = out_buffer;
-	char		sep = 94;
+	unsigned char	*loc = NULL;
+	bool			between_quotes = 0;
+	int				between_quotes_n = 0;
+	char			out_buffer[len + 1];
+	char			*out = out_buffer;
+	char			*spare = out_buffer;
+	char			sep = 94; // ^ character
+
+	Trace("In parse_handoff");
+	Dbg("Len is %zu", len);
 
 	/* Zero our output buffer */
 	for (int j = 0; j < len; j++) {
@@ -583,10 +608,7 @@ parse_handoff(unsigned char *buf, size_t len)
 	}
 
 	spare = out;
-
 	loc = buf;
-
-	Dbg("Len is %zu", len);
 
 	/*
 	 * The below removes everyting except tag and value, adding sep
@@ -626,16 +648,14 @@ parse_handoff(unsigned char *buf, size_t len)
 	Dbg("Pre tokenising:");
 	Dbg("%s", spare);
 
-	char           *cp = NULL;
-	char           *dp = NULL;
-	char		tokens    [] = {sep, '\0'};
-	pair		pairs     [between_quotes_n];
-	//2 x as big as needed ? Not worried as essentially a buffer value
-		bookmark bm[between_quotes_n];
-	//Same comment
-		int		count = 0;
-	int		bm_count = 0;
-	int		i = 0;
+	char		*cp = NULL;
+	char		*dp = NULL;
+	char		tokens[] = {sep, '\0'};
+	pair		pairs[between_quotes_n]; //2 x as big as needed ? Not worried as essentially a buffer value
+	bookmark	bm[between_quotes_n]; //Same comment
+	int			count = 0;
+	int			bm_count = 0;
+	int			i = 0;
 	bool		tag = true;
 
 	cp = strtok(spare, tokens);
@@ -657,7 +677,7 @@ parse_handoff(unsigned char *buf, size_t len)
 			count++;
 		}
 
-		tag = !tag;	/* Toggle tag and value */
+		tag = !tag;									   /* Toggle tag and value */
 		cp = strtok(NULL, tokens);
 	}
 
@@ -666,8 +686,9 @@ parse_handoff(unsigned char *buf, size_t len)
 		if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags") || strstr(pairs[j].tag, "hash")) {
 			Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
 
-			//Put the values in
-				if (strstr(pairs[j].tag, "hash"))
+			// Put the values in
+			// strstr() returns the pointer to the substring in the sring
+			if (strstr(pairs[j].tag, "hash"))
 				bm[i].hash = pairs[j].value;
 			if (strstr(pairs[j].tag, "href"))
 				bm[i].href = pairs[j].value;
@@ -687,14 +708,9 @@ parse_handoff(unsigned char *buf, size_t len)
 	Dbg("In bookmark array:");
 	for (int j = 0; j < bm_count; j++) {
 		printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
-
 		printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
-
 		printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
-
 		printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
-
-		putchar('\n');
 		putchar('\n');
 	}
 
@@ -710,19 +726,20 @@ parse_handoff(unsigned char *buf, size_t len)
 	return 0;
 }
 
-int
-output(char *filedir, char *verb)
+// Sets up YAJL then sends to parse_handoff
+int output(char *filedir, char *verb)
 {
-	yajl_handle	hand;
+	yajl_handle		hand;
 	static unsigned char fileData[65536];
 	/* generator config */
-	yajl_gen	g;
-	yajl_status	stat;
-	size_t		rd;
-	int		retval = 0;
-	FILE           *fp;
-	char           *filename;
+	yajl_gen		g;
+	yajl_status		stat;
+	size_t			rd;
+	int				retval = 0;
+	FILE			*fp;
+	char			*filename;
 
+	Trace("In output");
 	asprintf(&filename, "%s/%s.json", filedir, verb);
 
 	fp = fopen(filename, "r");
@@ -784,15 +801,18 @@ output(char *filedir, char *verb)
 	return 0;
 }
 
-char           *
-file_to_mem(char *directory, char *verb)
+// Reads file to freshly malloc'd char*
+// The return value will need freeing
+char * file_to_mem(char *directory, char *verb)
 {
-	char           *filepath;
-	struct stat	buffer;
-	int		status;
-	int		fildes;
-	int		bytes_read = 1;
-	char           *data = NULL;
+	char			*filepath;
+	int				status;
+	int				fildes;
+	int				bytes_read = 1;
+	char			*data = NULL;
+	struct	stat	buffer;
+
+	Trace("In file_to_mem");
 
 	asprintf(&filepath, "%s/%s.json", directory, verb);
 	V("Opening file %s", filepath);
@@ -807,7 +827,7 @@ file_to_mem(char *directory, char *verb)
 
 	if (buffer.st_size > 1024) {
 		//If more than a meg something is going wrong, bail
-			Ftl("File is more than a meg which doesn't make sense, bailing");
+		Ftl("File is more than a meg which doesn't make sense, bailing");
 	} else {
 		data = malloc(buffer.st_size + 1);
 	}
@@ -818,18 +838,19 @@ file_to_mem(char *directory, char *verb)
 		bytes_read = read(fildes, data, buffer.st_size);
 
 	close(fildes);
-
 	free(filepath);
 
 	return data;
 }
 
-void 
-simple_parse_field(int field, char delim, char *data_from, char *data_to, int max)
+//
+void simple_parse_field(int field, char delim, char *data_from, char *data_to, int max)
 {
-	char           *loc, *out;
+	char		*loc, *out;
 	bool		in_field = false;
-	int		in_field_count = 0;
+	int			in_field_count = 0;
+
+	Trace("In simple_parse_field");
 
 	loc = data_from;
 	out = data_to;
@@ -858,35 +879,34 @@ simple_parse_field(int field, char delim, char *data_from, char *data_to, int ma
  * rmated-timestamps/
  */
 
-void 
-convert_iso8601(const char *time_string, int ts_len, struct tm *tm_data)
+void convert_iso8601(const char *time_string, int ts_len, struct tm *tm_data)
 {
 	tzset();
 
 	char		temp      [64];
+	struct tm	ctime;
+	long		ts = mktime(&ctime);
+
 	memset(temp, 0, sizeof(temp));
 	strncpy(temp, time_string, ts_len);
 
-	struct tm	ctime;
 	memset(&ctime, 0, sizeof(struct tm));
 	strptime(temp, "%FT%T%z", &ctime);
-
-	long		ts = mktime(&ctime);
 	localtime_r(&ts, tm_data);
 }
 
-int
-check_update()
+int check_update()
 {
 	puts("TODO: check for updates");
 	return 0;
 }
 
-int
-api_download(char *verb, char *username, char *password, char *directory)
+// Wrapper for downloading with the API
+int api_download(char *verb, char *username, char *password, char *directory)
 {
-	char           *url;
-	char           *filepath;
+	char		*url;
+	char		*filepath;
+	Trace("In api_download");
 
 	asprintf(&url, "https://%s:%s@api.pinboard.in/v1/posts/%s&format=json", username, password, verb);
 	asprintf(&filepath, "%s/%s.json", directory, verb);
@@ -908,22 +928,22 @@ api_download(char *verb, char *username, char *password, char *directory)
 	return 0;
 }
 
-int
-devel(char *filepath)
+// 
+int devel(char *filepath)
 {
-	char           *d;
-	char		b1        [1024] = {0};
+	char		*d;
+	char		b1[1024] = {0};
 	struct tm	tms;
+	char		buf[128];
 
 	d = file_to_mem(filepath, "update");
-	// ?
+	//?
 	simple_parse_field(2, '"', d, b1, strlen(d));
 	puts(b1);
 
 	memset(&tms, 0, sizeof(struct tm));
 	convert_iso8601(b1, strlen(b1), &tms);
 
-	char		buf       [128];
 	strftime(buf, sizeof(buf), "Date: %a, %d %b %Y %H:%M:%S %Z", &tms);
 	printf("%s\n", buf);
 
@@ -932,17 +952,15 @@ devel(char *filepath)
 	return 0;
 }
 
-int
-main(int argc, char *argv[])
+int main(int argc, char *argv[])
 {
-	char           *filepath;
-	char		msg_warn  [] =
+	char		*filepath;
+	char		msg_warn[] =
 	"\n"
 	"NOTE: CURRENTLY STILL IN DEVELOPMENT\n"
-	"Do not use.\n"
 	"\n";
 
-	char		msg_usage [] =
+	char		msg_usage[] =
 	"______________\n"
 	"pinboard-shell\n"
 	"______________\n"
@@ -964,7 +982,7 @@ main(int argc, char *argv[])
 	"./main -o\n"
 	"\n";
 
-	error_mode = 's';	/* Makes Stopif use abort() */
+	error_mode = 's'; /* Makes Stopif use abort() */
 
 	/*
 	 * getopt loop --
@@ -972,35 +990,45 @@ main(int argc, char *argv[])
 	 * l
 	 */
 
-	int		c;
-	int		errflg = 0;
-	int		exitflg = 0;
-	int		ret = 0;
+	int			c;
+	int			errflg = 0;
+	int			exitflg = 0;
+	int			ret = 0;
+
 	bool		opt_remote = false;
-	int		opt_download = 0;
-	int		opt_test = 0;
-	int		opt_output = 0;
-	int		opt_warn = 1;
+	int			opt_download = 0;
+	int			opt_test = 0;
+	int			opt_output = 0;
+	int			opt_warn = 1;
 	bool		opt_check = 0;
 	bool		opt_devel = false;
-	char           *opt_username = NULL;
-	char           *opt_password = NULL;
-	extern char    *optarg;
+	bool		opt_alpha = false;
+
+	char		*opt_username = NULL;
+	char		*opt_password = NULL;
+
+	extern char	*optarg;
 	extern int	optind, optopt;
 
 	if (argc == 1) {
 		fprintf(stderr, "%s", msg_usage);
 		return 2;
 	}
-	while ((c = getopt(argc, argv, ":wegotdcsvzu:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":wegotdcsvzau:p:")) != -1) {
 		switch (c) {
-		case 'w': opt_warn = 0; break;
-		case 'e': opt_devel = true; break;
+			case 'a':
+			opt_alpha = !opt_alpha;
+		case 'w':
+			opt_warn = 0;
+			break;
+		case 'e':
+			opt_devel = true;
+			break;
 		case 'g':
 			opt_remote = true;
 			opt_download++;
 			break;
-		case 'o':	/* TODO: make argument to an API verb? */
+		case 'o':									   /* TODO: make argument * to an API verb? */
 			opt_output++;
 			break;
 		case 't':
@@ -1009,7 +1037,7 @@ main(int argc, char *argv[])
 			break;
 		case 'd':
 			opt_debug++;
-			error_mode = 's';	/* Makes Stopif use abort() */
+			error_mode = 's';							   /* Makes Stopif use * abort() */
 			break;
 		case 'c':
 			test_colours();
@@ -1031,7 +1059,8 @@ main(int argc, char *argv[])
 		case 'z':
 			opt_devel = true;
 			break;
-		case ':':	/* -u or -p without operand */
+		case ':':									   /* -u or -p without
+												    * operand */
 			fprintf(stderr, "Option -%c requires an operand\n", optopt);
 			errflg++;
 			break;
@@ -1052,11 +1081,24 @@ main(int argc, char *argv[])
 		      "%s as username\n"
 		      "%s as password", opt_username, opt_password);
 	} else if (opt_remote && (!opt_username || !opt_password)) {
-		Se("You need to supply both a username and password");
-		return -1;
+		char b1[512];
+		if (!opt_username) { 
+			Zero_char(b1, sizeof(b1));
+			ask_string(true, "Username: ", b1);
+			asprintf(&opt_username, "%s", b1);
+		}
+		if (!opt_password) {
+			Zero_char(b1, sizeof(b1));
+			opt_password = getpass("Password: ");
+			//asprintf(&opt_password, "%s", b1);
+		}
+
+		Print("Using:\n"
+		      "%s as username\n"
+		      "%s as password", opt_username, opt_password);
 	}
-	if (opt_warn)
-		puts(msg_warn);
+
+	if (opt_warn) puts(msg_warn);
 
 	/*
 	 * Steps > See if JSON file exists and is not old > If not, download
@@ -1069,11 +1111,11 @@ main(int argc, char *argv[])
 	V("Looking in %s", filepath);
 	check_dir(filepath);
 
-	/* Download the JSON data */
 	if (opt_download) {
-		//api_download(char *verb, char *username, char *password, char *filepath)
-			api_download("all", opt_username, opt_password, filepath);
+		/* Download the JSON data */
+		api_download("all", opt_username, opt_password, filepath);
 	}
+
 	if (opt_check) {
 		V("Checking");
 		api_download("update", opt_username, opt_password, filepath);
@@ -1090,6 +1132,7 @@ main(int argc, char *argv[])
 	if (opt_devel) {
 		devel(filepath);
 	}
+
 	free(filepath);
 
 	return ret;
