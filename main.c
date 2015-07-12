@@ -623,10 +623,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 				between_quotes_n++;
 
 			if (!between_quotes) {
-				/*
-				 * Hack to avoid empty fields and have a
-				 * space instead
-				 */
+				// Hack to avoid empty fields and have a space instead
 				if (*(out - 1) == sep) {
 					*out = ' ';
 					out++;
@@ -646,7 +643,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	/* out_buffer now contains all our buffer to tokenise */
 	Dbg("Pre tokenising:");
-	Dbg("%s", spare);
+	// Dbg("%s", spare);
 
 	char		*cp = NULL;
 	char		*dp = NULL;
@@ -684,7 +681,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 	Dbg("Post tokenising:");
 	for (int j = 0; j < count; j++) {
 		if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags") || strstr(pairs[j].tag, "hash")) {
-			Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
+	//		Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
 
 			// Put the values in
 			// strstr() returns the pointer to the substring in the sring
