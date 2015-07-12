@@ -633,8 +633,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	/* Zero our output buffer */
 	for (int j = 0; j < len; j++) {
-//		*spare = '\0';
-		*spare = NULL;
+		*spare = '\0';
 		spare++;
 	}
 
@@ -649,7 +648,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 	for (int j = 0; j < len; j++) {
 		if (*loc == '"') {
 			/* When we hit the double quote char, toggle the bool to reflect the fact that we are entering or leaving a quoted string */
-			between_quotes = !between_quotes
+			between_quotes = !between_quotes;
 			/* If entering a quoted string, increment the count of quoted strings */
 			if (between_quotes) between_quotes_n++;
 
@@ -678,8 +677,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	char		*cp = NULL;
 	char		*dp = NULL;
-	//char		tokens[] = {sep, '\0'};
-	char		tokens[] = {sep, NULL};
+	char		tokens[] = {sep, '\0'};
 	pair		pairs[between_quotes_n]; // TODO: 2 x as big as needed ? Not worried as essentially a buffer value
 	bookmark	bm[between_quotes_n]; // Same comment
 	int			count = 0;
@@ -1043,17 +1041,28 @@ int main(int argc, char *argv[])
 	/* NEW BOOKMARK */
 
 	struct {
-		bool	opt_remote = false;
-		bool 	opt_download = false;
-		bool 	opt_test = false;
-		bool	opt_output = false;
-		bool	opt_warn = true;
-		bool	opt_check = false;
-		bool	opt_devel = false;
-		bool	opt_alpha = false;
-		char	*opt_username = NULL;
-		char	*opt_password = NULL;
-	}	options;
+		bool	opt_remote;
+		bool 	opt_download;
+		bool 	opt_test;
+		bool	opt_output;
+		bool	opt_warn;
+		bool	opt_check;
+		bool	opt_devel;
+		bool	opt_verbose;
+		char	*opt_username;
+		char	*opt_password;
+	} options;
+
+	options.opt_remote = false;
+	options.opt_download = false;
+	options.opt_test = false;
+	options.opt_output = false;
+	options.opt_warn = true;
+	options.opt_check = false;
+	options.opt_devel = false;
+	options.opt_verbose = false;
+	options.opt_username = NULL;
+	options.opt_password = NULL;
 
 	/* Required for getopt */
 	extern char	*optarg;
@@ -1066,10 +1075,8 @@ int main(int argc, char *argv[])
 	}
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
-	while ((c = getopt(argc, argv, ":wegotdcsvzau:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":wegotdcsvzu:p:")) != -1) {
 		switch (c) {
-			case 'a':
-			options.opt_alpha = !options.opt_alpha;
 		case 'w':
 			options.opt_warn = false;
 			break;
@@ -1088,7 +1095,7 @@ int main(int argc, char *argv[])
 			options.opt_test = true;
 			break;
 		case 'd':
-			options.opt_debug = true;
+			options.opt_devel= true;
 			error_mode = 's';							   /* Makes Stopif use * abort() */
 			break;
 		case 'c':
@@ -1096,20 +1103,20 @@ int main(int argc, char *argv[])
 			exitflg++;
 			break;
 		case 'u':
-			asprintf(&opt_username, "%s", optarg);
+			asprintf(&options.opt_username, "%s", optarg);
 			break;
 		case 'p':
-			asprintf(&opt_password, "%s", optarg);
+			asprintf(&options.opt_password, "%s", optarg);
 			break;
 		case 's':
-			opt_check = true;
-			opt_remote = true;
+			options.opt_check = true;
+			options.opt_remote = true;
 			break;
 		case 'v':
-			opt_verbose = !opt_verbose;
+			options.opt_verbose = !options.opt_verbose;
 			break;
 		case 'z':
-			opt_devel = true;
+			options.opt_devel = true;
 			break;
 		case ':':									   /* -u or -p without operand */
 			fprintf(stderr, "Option -%c requires an operand\n", optopt);
@@ -1139,7 +1146,7 @@ int main(int argc, char *argv[])
 		if (!options.opt_username) { 
 			Zero_char(b1, sizeof(b1));
 			ask_string(true, "Username: ", b1);
-			asprintf(&opt_username, "%s", b1);
+			asprintf(&options.opt_username, "%s", b1);
 		}
 		if (!options.opt_password) {
 			Zero_char(b1, sizeof(b1));
@@ -1153,7 +1160,7 @@ int main(int argc, char *argv[])
 		      "%s as password", options.opt_username, options.opt_password);
 	}
 
-	if (opt_warn) puts(msg_warn);
+	if (options.opt_warn) puts(msg_warn);
 
 	/*
 	 * Steps > See if JSON file exists and is not old > If not, download
