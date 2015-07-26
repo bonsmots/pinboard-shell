@@ -9,7 +9,8 @@
 
 /*
  * NOTE:
- * YAJL needs cmake to build cd yayl/ ./configure make
+ * YAJL needs cmake.
+ * To build: cd yayl/ && ./configure && make
  *
  * -I yajl/build/yajl-2.1.1/include -L yajl/build/yajl-2.1.1/lib
  */
@@ -92,7 +93,7 @@
 #include <unistd.h> // close, getopt, getpass
 #include <string.h> // strstr, strdup, strtok
 #include <stdbool.h> // C99 includes bool type
-#include <time.h>
+#include <time.h> // time types
 
 /*
  * Headers -- local
@@ -108,11 +109,10 @@
 
 // TODO: clean these up a bit, duplicated functionality
 
-#define Trace(...) \
+#define Trace() \
 { \
 	if (opt_trace) { \
-	fprintf(stdout, "Trace: "); \
-	fprintf(stdout, __VA_ARGS__); \
+	fprintf(stdout, "Trace: %s", __FUNCTION__); \
 	fprintf(stdout, "\n"); \
 	} \
 }
@@ -137,7 +137,7 @@
 #define V(...) \
 { \
 	if (opt_verbose) { \
-	fprintf(stderr, "Verbose message: "); \
+	fprintf(stderr, "Verbose: "); \
 	fprintf(stderr, __VA_ARGS__); \
 	fprintf(stderr, "\n"); \
 	} \
@@ -232,9 +232,9 @@ if (assertion) \
  * Option globals
  */
 
-int		opt_debug = 0;
-bool	opt_verbose = true;
-bool	opt_trace = true;
+bool	opt_debug = false;
+bool	opt_verbose = false;
+bool	opt_trace = false;
 
 /*
  * Other globals
@@ -345,7 +345,7 @@ int check_dir(char *dirpath)
 	int		status;
 	int		fildes;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	/* Open, get status, close */
 	fildes = open(dirpath, O_RDONLY | O_DIRECTORY);
@@ -380,6 +380,24 @@ int check_dir(char *dirpath)
 	return 0;
 }
 
+bool does_file_exist(char *filepath)
+{
+	struct stat	buffer;
+	int		status;
+	int		fildes;
+
+	Trace(); 
+
+	fildes = open(filepath, O_RDONLY);
+	status = fstat(fildes, &buffer);
+	close(fildes);
+
+	if (status == -1) {
+		V("%s does not seem to exist or is not readable", filepath);
+		return false;
+	} else return true;
+}
+
 // Does file exist with sensible permissions? If not, create it.
 int make_file(char *filepath)
 {
@@ -387,7 +405,7 @@ int make_file(char *filepath)
 	int		status;
 	int		fildes;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	fildes = open(filepath, O_RDONLY);
 	status = fstat(fildes, &buffer);
@@ -469,7 +487,7 @@ int test_colours()
 		"White            "
 	};
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	for (int i = 0; i < (colour_count - 1); i++)
 		printf("%s%s\n", colours[i], colour_labels[i]);
@@ -479,19 +497,21 @@ int test_colours()
 
 /* From example at http://curl.haxx.se/libcurl/c/simple.html */
 /* TODO: add check for 401 response */
-/* TODO: set username and pass via curl opts */
 // Pulls file at URL using CURL, writes to filepath
-int curl_grab(char *url, char *filepath)
+int curl_grab(char *url, char *filepath, char *username, char *password)
 {
 	CURL		*curl;
 	CURLcode	res;
 	FILE		*fp;
 	bool		curl_success;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	fp = fopen(filepath, "w");
 	if (!fp)
+		return -1;
+
+	if (!strval(username) || !strval(password))
 		return -1;
 
 	curl = curl_easy_init();
@@ -499,6 +519,8 @@ int curl_grab(char *url, char *filepath)
 		curl_success = true;
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+		curl_easy_setopt(curl, CURLOPT_USERNAME, username);
+		curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
 		curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect
 		res = curl_easy_perform(curl); /* Perform the request, res will get the return code */
 
@@ -521,7 +543,7 @@ int simple_output(char *filedir, char *verb)
 	char	buf;
 	int		fd;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	asprintf(&filename, "%s/%s.json", filedir, verb);
 
@@ -551,7 +573,7 @@ int pretty_json_output(char *filedir, char *verb)
 	FILE			*fp;
 	char			*filename;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	asprintf(&filename, "%s/%s.json", filedir, verb);
 
@@ -627,7 +649,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 	char			*spare = out_buffer;
 	char			sep = 94; // ^ character
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	Dbg("Len is %zu", len);
 
@@ -775,7 +797,7 @@ int output(char *filedir, char *verb)
 	FILE			*fp;
 	char			*filename;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	asprintf(&filename, "%s/%s.json", filedir, verb);
 
@@ -853,7 +875,7 @@ char * file_to_mem(char *directory, char *verb)
 	char			*data = NULL;
 	struct	stat	buffer;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	asprintf(&filepath, "%s/%s.json", directory, verb);
 	V("Opening file %s", filepath);
@@ -884,14 +906,22 @@ char * file_to_mem(char *directory, char *verb)
 	return data;
 }
 
-//
+/*
+ * Copies a field in data_from to data_fo
+ *
+ * field is the field we want e.g. 1, 2, 3 ... etc
+ * delim is the delimiter character
+ * data_from is source data
+ * date_to is where to copy the field
+ * max is sizeof data_from
+ */
 void simple_parse_field(int field, char delim, char *data_from, char *data_to, int max)
 {
 	char		*loc, *out;
 	bool		in_field = false;
 	int			in_field_count = 0;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
 	loc = data_from;
 	out = data_to;
@@ -916,31 +946,36 @@ void simple_parse_field(int field, char delim, char *data_from, char *data_to, i
 }
 
 /*
- * http://www.ioncannon.net/programming/33/using-strptime-to-parse-iso-8601-fo
- * rmated-timestamps/
+ * Takes string in iso8601 format
+ * Returns time_t
+ * Note: pinboard API seems to always assume the time is GMT, so that is what we do here
+ * http://stackoverflow.com/questions/26895428/how-do-i-parse-an-iso-8601-date-with-optional-milliseconds-to-a-struct-tm-in-c
  */
 
-void convert_iso8601(const char *time_string, int ts_len, struct tm *tm_data)
+time_t convert_iso8601(char *dt_string)
 {
-	tzset();
+	int y, M, d, h, m;
+	float s;
+	struct tm time;
 
-	char		temp      [64];
-	struct tm	ctime;
-	long		ts = mktime(&ctime);
+	Trace(); 
 
-	Trace("In %s", __func__); 
+	sscanf(dt_string, "%d-%d-%dT%d:%d:%fZ", &y, &M, &d, &h, &m, &s);
+		
+	time.tm_year = y - 1900; // Year since 1900
+	time.tm_mon = M - 1;     // 0-11
+	time.tm_mday = d;        // 1-31
+	time.tm_hour = h;        // 0-23
+	time.tm_min = m;         // 0-59
+	time.tm_sec = (int)s;    // 0-61 (0-60 in C++11)
+	//time.tm_isdst = 0;
 
-	memset(temp, 0, sizeof(temp));
-	strncpy(temp, time_string, ts_len);
-
-	memset(&ctime, 0, sizeof(struct tm));
-	strptime(temp, "%FT%T%z", &ctime);
-	localtime_r(&ts, tm_data);
+	return mktime(&time);
 }
 
 int check_update()
 {
-	Trace("In %s", __func__); 
+	Trace(); 
 	puts("TODO: check for updates");
 	return 0;
 }
@@ -951,9 +986,9 @@ int api_download(char *verb, char *username, char *password, char *directory)
 	char		*url;
 	char		*filepath;
 
-	Trace("In %s", __func__); 
+	Trace(); 
 
-	asprintf(&url, "https://%s:%s@api.pinboard.in/v1/posts/%s&format=json", username, password, verb);
+	asprintf(&url, "https://api.pinboard.in/v1/posts/%s&format=json", verb);
 	asprintf(&filepath, "%s/%s.json", directory, verb);
 
 	/* TODO: check update time */
@@ -965,37 +1000,154 @@ int api_download(char *verb, char *username, char *password, char *directory)
 
 	Print("Using:\n"
 	      "%s as filepath\n"
-	      "%s as URL", filepath, url);
+	      "%s as URL\n"
+		  "%s/%s as username/pass", filepath, url, username, password);
 
-	curl_grab(url, filepath);
+	curl_grab(url, filepath, username, password);
 	free(url);
 	free(filepath);
 	return 0;
 }
 
+time_t get_file_last_mod_time(char *filepath)
+{
+	int				status;
+	int				fildes;
+	struct	stat	buffer;
+
+	Trace(); 
+	V("Opening file %s", filepath);
+
+	fildes = open(filepath, O_RDONLY);
+	if (fildes < 0)
+		Ftl("Cannot open %s", filepath);
+
+	status = fstat(fildes, &buffer);
+	close(fildes);
+
+	return buffer.st_mtime;	
+}
+
+/* Get age of file -- returns 'age' (i.e. time since last modified) of file in seconds as a double */
+double time_since_last_mod(char *file)
+{
+	struct tm	file_tm;
+	struct tm	current_tm;
+	time_t	file_last_mod;
+	time_t	current_time;
+
+	char buffer[512];
+	double seconds_age;
+
+	Trace(); 
+
+	file_last_mod = get_file_last_mod_time(file);
+
+	localtime_r(&file_last_mod, &file_tm);
+	Zero_char(buffer, sizeof(buffer));
+	strftime(buffer, sizeof(buffer), "%A %F %T %Z", &file_tm);
+	V("Update time %s", buffer);
+
+	current_time = time(NULL);			
+	localtime_r(&current_time, &current_tm);
+	Zero_char(buffer, sizeof(buffer));
+	strftime(buffer, sizeof(buffer), "%A %F %T %Z", &current_tm);
+	V("Current time %s", buffer);
+
+	seconds_age = difftime(mktime(&current_tm), mktime(&file_tm));
+	V("Delta in seconds %.0f, minutes %.2f, hours %.2f", seconds_age, seconds_age / 60.0, seconds_age / 60.0 / 60.0);
+
+	return seconds_age;
+}
+
+bool is_file_more_recent(char *file, struct tm dt_tm)
+{
+	time_t file_last_mod;
+	struct tm	file_tm;
+	char buffer[512];
+	double delta;
+
+	Trace(); 
+
+	file_last_mod = get_file_last_mod_time(file);
+	localtime_r(&file_last_mod, &file_tm);
+
+	Zero_char(buffer, sizeof(buffer));
+	strftime(buffer, sizeof(buffer), "%A %F %T %Z", &file_tm);
+	V("Update time %s", buffer);
+
+	delta = difftime(mktime(&file_tm), mktime(&dt_tm));
+	V("Delta in seconds %.0f, minutes %.2f, hours %.2f", delta, delta / 60.0, delta / 60.0 / 60.0);
+
+	return (delta > 0);
+}
+
 // 
-int devel(char *filepath)
+int auto_update(char *filepath, char *username, char *password)
 {
 	char		*d;
 	char		b1[1024] = {0};
-	struct tm	tms;
-	char		buf[128];
+	char	 	buffer[512];
+	double		time_since_update;
 
-	Trace("In %s", __func__); 
+	time_t		api_update_time;
+	struct tm	api_update_time_tm;
 
+	Trace(); 
+
+	/* Check when update.json last updated */
+	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
+
+	if (!does_file_exist(buffer)) {
+		V("Downloading")
+		api_download("update", username, password, filepath);
+	}
+
+	time_since_update = time_since_last_mod(buffer);
+
+	/* D/l if stale */
+	if (time_since_update >= (5 * 60)) /* If greater than 5 mins have elapsed */
+	{
+		V("Looks stale, let's update");
+		api_download("update", username, password, filepath);
+	} else {
+		V("Recent enough, not updating");
+	}
+
+	/* See when update.json says we last updated */
 	d = file_to_mem(filepath, "update");
-	//?
 	simple_parse_field(2, '"', d, b1, strlen(d));
-	puts(b1);
-
-	memset(&tms, 0, sizeof(struct tm));
-	convert_iso8601(b1, strlen(b1), &tms);
-
-	strftime(buf, sizeof(buf), "Date: %a, %d %b %Y %H:%M:%S %Z", &tms);
-	printf("%s\n", buf);
-
 	free(d);
 
+	api_update_time = convert_iso8601(b1);
+	localtime_r(&api_update_time, &api_update_time_tm);
+
+	Zero_char(buffer, sizeof(buffer));
+	strftime(buffer, sizeof(buffer), "%A %F %T %Z", &api_update_time_tm);
+	V("API tells us we last updated on %s (Note this is cached)", buffer);
+
+	/* Check when all.json last updated */
+	Zero_char(buffer, sizeof(buffer));
+	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "all.json");
+	if (is_file_more_recent(buffer, api_update_time_tm))
+	{
+		V("Data is more recent than last update according to API");
+	}
+	else
+	{
+		V("Data is older than last update according to API, let's update");
+		api_download("all", username, password, filepath);
+		/* We also delete update.json to force this to be updated next time run */
+		Zero_char(buffer, sizeof(buffer));
+		snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
+		if (remove(buffer)) {
+			Ftl("Failed to delete %s", buffer);
+		} else {
+			V("%s deleted", buffer);
+		}
+	}
+
+	output(filepath, "all");
 	return 0;
 }
 
@@ -1015,21 +1167,21 @@ int main(int argc, char *argv[])
 	"______________\n"
 	"\n"
 	"Usage:\n"
-	"-o output\n"
-	"-c test colours\n"
-	"-g get updated JSON file\n"
-	"-s get updated JSON file only if newer than current version NOT YET IMPLIMENTED\n"
-	"-t test JSON parser on already downloaded file\n"
+	"-o output only, do not autoupdate\n"
+	"-v toggle verbose\n" 
 	"-d turn debug mode on\n"
 	"-u username arg\n"
 	"-p password arg\n"
+	"-h this help\n"
 	"\n"
 	"Example usage:\n"
-	"1. Download bookmarks file from pinboard.in\n"
-	"./main -u $USERNAME -p $PASSWORD -g\n"
-	"2. Output\n"
+	"Download bookmarks file from pinboard.in\n"
+	"./main\n"
+	"OR\n"
+	"Output only\n"
 	"./main -o\n"
 	"\n";
+
 
 	error_mode = 's'; /* Makes Stopif use abort() */
 
@@ -1042,25 +1194,19 @@ int main(int argc, char *argv[])
 
 	struct {
 		bool	opt_remote;
-		bool 	opt_download;
-		bool 	opt_test;
-		bool	opt_output;
+		bool	opt_output_only;
 		bool	opt_warn;
 		bool	opt_check;
-		bool	opt_devel;
-		bool	opt_verbose;
+		bool	opt_default;
 		char	*opt_username;
 		char	*opt_password;
 	} options;
 
-	options.opt_remote = false;
-	options.opt_download = false;
-	options.opt_test = false;
-	options.opt_output = false;
+	options.opt_remote = true; /* Assume we are going to be downloading and therefore require username/pass */
+	options.opt_output_only = false;
 	options.opt_warn = true;
 	options.opt_check = false;
-	options.opt_devel = false;
-	options.opt_verbose = false;
+	options.opt_default = true;
 	options.opt_username = NULL;
 	options.opt_password = NULL;
 
@@ -1068,55 +1214,31 @@ int main(int argc, char *argv[])
 	extern char	*optarg;
 	extern int	optind, optopt;
 
-	/* If no arguments, print usage message and quit. */
-	if (argc == 1) {
-		fprintf(stderr, "%s", msg_usage);
-		return 2;
-	}
-
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
-	while ((c = getopt(argc, argv, ":wegotdcsvzu:p:")) != -1) {
+	// -o -v -d -h -u -p
+	while ((c = getopt(argc, argv, ":ovdhu:p:")) != -1) {
 		switch (c) {
-		case 'w':
-			options.opt_warn = false;
-			break;
-		case 'e':
-			options.opt_devel = true;
-			break;
-		case 'g':
-			options.opt_remote = true;
-			options.opt_download = true;
-			break;
-		case 'o':									   /* TODO: make argument * to an API verb? */
-			options.opt_output = true;
-			break;
-		case 't':
+		case 'o':
+			options.opt_output_only = true;
 			options.opt_remote = false;
-			options.opt_test = true;
+			break;
+		case 'v':
+			opt_verbose = !opt_verbose;
 			break;
 		case 'd':
-			options.opt_devel= true;
+			opt_verbose = true;
+			opt_trace = true;
+			opt_debug = true;
 			error_mode = 's';							   /* Makes Stopif use * abort() */
 			break;
-		case 'c':
-			test_colours();
-			exitflg++;
+		case 'h':
+			errflg = true;
 			break;
 		case 'u':
 			asprintf(&options.opt_username, "%s", optarg);
 			break;
 		case 'p':
 			asprintf(&options.opt_password, "%s", optarg);
-			break;
-		case 's':
-			options.opt_check = true;
-			options.opt_remote = true;
-			break;
-		case 'v':
-			options.opt_verbose = !options.opt_verbose;
-			break;
-		case 'z':
-			options.opt_devel = true;
 			break;
 		case ':':									   /* -u or -p without operand */
 			fprintf(stderr, "Option -%c requires an operand\n", optopt);
@@ -1173,26 +1295,16 @@ int main(int argc, char *argv[])
 	V("Looking in %s", filepath);
 	check_dir(filepath);
 
-	if (options.opt_download) {
-		/* Download the JSON data */
-		api_download("all", options.opt_username, options.opt_password, filepath);
+	tzset(); /* Set timezone I do believe */
+
+	if (options.opt_output_only) {
+		output(filepath, "all");
+		options.opt_default = false;
 	}
 
-	if (options.opt_check) {
-		V("Checking");
-		api_download("update", options.opt_username, options.opt_password, filepath);
-		simple_output(filepath, "update");
-	}
-	if (options.opt_test) {
-		Dbg("Pretty output");
-		pretty_json_output(filepath, "all");
-	}
-	if (options.opt_output) {
-		Dbg("Output");
+	if (options.opt_default) {
+		auto_update(filepath, options.opt_username, options.opt_password);
 		output(filepath, "all");
-	}
-	if (options.opt_devel) {
-		devel(filepath);
 	}
 
 	free(filepath);
