@@ -112,7 +112,7 @@
 #define Trace() \
 { \
 	if (opt_trace) { \
-	fprintf(stdout, "Trace: %s", __FUNCTION__); \
+	fprintf(stdout, "Trace: %s at line %i", __FUNCTION__, __LINE__); \
 	fprintf(stdout, "\n"); \
 	} \
 }
@@ -157,6 +157,7 @@
 
 #define Print(...) \
 { \
+	fprintf(stdout, "At %i: ", __LINE__); \
 	fprintf(stdout, __VA_ARGS__); \
 	fprintf(stdout, "\n"); \
 }
@@ -782,7 +783,6 @@ int parse_handoff(unsigned char *buf, size_t len)
 	return 0;
 }
 
-/* OLD BOOKMARK */
 // Sets up YAJL then sends to parse_handoff
 int output(char *filedir, char *verb)
 {
@@ -1021,6 +1021,7 @@ time_t get_file_last_mod_time(char *filepath)
 	fildes = open(filepath, O_RDONLY);
 	if (fildes < 0)
 		Ftl("Cannot open %s", filepath);
+	//	Dbg("Cannot open %s", filepath);
 
 	status = fstat(fildes, &buffer);
 	close(fildes);
@@ -1095,7 +1096,17 @@ int auto_update(char *filepath, char *username, char *password)
 
 	Trace(); 
 
+	/* Check we have all.json */
+	Zero_char(buffer, sizeof(buffer));
+	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "all.json");
+
+	if (!does_file_exist(buffer)) {
+		V("%s doesn't seem to exist, pulling", buffer);
+		api_download("all", username, password, filepath);
+	}
+
 	/* Check when update.json last updated */
+	Zero_char(buffer, sizeof(buffer));
 	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
 
 	if (!does_file_exist(buffer)) {
@@ -1173,6 +1184,7 @@ int main(int argc, char *argv[])
 	"-u username arg\n"
 	"-p password arg\n"
 	"-h this help\n"
+	"-l pipe through less\n"
 	"\n"
 	"Example usage:\n"
 	"Download bookmarks file from pinboard.in\n"
@@ -1276,10 +1288,6 @@ int main(int argc, char *argv[])
 			options.opt_password = getpass("Password: ");
 			//asprintf(&opt_password, "%s", b1);
 		}
-
-		Print("Using:\n"
-		      "%s as username\n"
-		      "%s as password", options.opt_username, options.opt_password);
 	}
 
 	if (options.opt_warn) puts(msg_warn);
