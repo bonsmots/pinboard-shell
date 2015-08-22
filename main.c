@@ -84,6 +84,10 @@
  * Headers -- global
  */
 
+#if defined(__linux__)
+#define _GNU_SOURCE // required on linux for asprintf
+#endif
+
 #include <stdio.h> // usual
 #include <stdlib.h> //abort, getenv
 #include <curl/curl.h> // curl
@@ -236,7 +240,8 @@ if (assertion) \
 bool	opt_debug = false;
 bool	opt_verbose = false;
 bool	opt_trace = false;
-
+bool	opt_tags_only = false;
+bool 	opt_no_colours = false;
 /*
  * Other globals
  */
@@ -640,6 +645,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 	/*
 	 * buf of size len is provided from YAJL and then passed in via
 	 * argument
+	 * Note: relies on opt_tags
 	 */
 
 	unsigned char	*loc = NULL;
@@ -767,10 +773,23 @@ int parse_handoff(unsigned char *buf, size_t len)
 	/* Index 0 is normal text control sequence */
 	Dbg("In bookmark array:");
 	for (int j = 0; j < bm_count; j++) {
-		printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
-		printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
-		printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
-		printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+		/* No colours version */
+		if (opt_no_colours)
+		{
+			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+			if (!opt_tags_only) {
+				printf("%s\n", bm[j].desc);
+				printf("%s\n", bm[j].href);
+			}
+			printf("%s\n", bm[j].tags);
+		} else {
+			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+			if (!opt_tags_only) {
+				printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
+				printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+			}
+			printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+		}
 		putchar('\n');
 	}
 
@@ -788,12 +807,11 @@ int output(char *filedir, char *verb)
 {
 	yajl_handle		hand;
 	static unsigned char fileData[65536];
-
+	int				retval = 0;
 	/* generator config */
 	yajl_gen		g;
 	yajl_status		stat;
 	size_t			rd;
-	int				retval = 0;
 	FILE			*fp;
 	char			*filename;
 
@@ -861,7 +879,7 @@ int output(char *filedir, char *verb)
 
 	free(filename);
 	fclose(fp);
-	return 0;
+	return retval;
 }
 
 // Reads file to freshly malloc'd char*
@@ -1162,6 +1180,36 @@ int auto_update(char *filepath, char *username, char *password)
 	return 0;
 }
 
+void force_update(char *filepath, char *username, char *password)
+{
+	char	 	buffer[512];
+	Trace();
+
+	V("Deleting update and all posts cache and re-downloading");
+
+	/* Delete update.json and re-download */
+	Zero_char(buffer, sizeof(buffer));
+	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
+	if (remove(buffer)) {
+		V("Failed to delete %s", buffer);
+	} else {
+		V("%s deleted", buffer);
+		api_download("update", username, password, filepath);
+	}
+
+	/* Delete all.json and re-download */
+	Zero_char(buffer, sizeof(buffer));
+	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "all.json");
+	if (remove(buffer)) {
+		V("Failed to delete %s", buffer);
+	} else {
+		V("%s deleted", buffer);
+		api_download("all", username, password, filepath);
+	}
+
+	return;
+}
+
 int main(int argc, char *argv[])
 {
 	/* Pointer to string of filepath where working files are located */
@@ -1178,6 +1226,9 @@ int main(int argc, char *argv[])
 	"______________\n"
 	"\n"
 	"Usage:\n"
+	"-f force update\n" /* TODO: check flow control */
+	"-t print tags only\n"
+	"-c turn off formatting e.g. for redirecting stdout to a file\n"
 	"-o output only, do not autoupdate\n"
 	"-v toggle verbose\n" 
 	"-d turn debug mode on\n"
@@ -1192,6 +1243,10 @@ int main(int argc, char *argv[])
 	"OR\n"
 	"Output only\n"
 	"./main -o\n"
+	"\n"
+	"Furhter Example usage:\n"
+	"List most frequent tags: pinboard-shell -otc | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
+	"List those tagged with $TAG for export to a file: pinboard-shell -oc | grep --color=never -B2 $TAG > $TAG.tagged\n"
 	"\n";
 
 
@@ -1210,6 +1265,7 @@ int main(int argc, char *argv[])
 		bool	opt_warn;
 		bool	opt_check;
 		bool	opt_default;
+		bool	opt_force_update;
 		char	*opt_username;
 		char	*opt_password;
 	} options;
@@ -1221,6 +1277,7 @@ int main(int argc, char *argv[])
 	options.opt_default = true;
 	options.opt_username = NULL;
 	options.opt_password = NULL;
+	options.opt_force_update = false;
 
 	/* Required for getopt */
 	extern char	*optarg;
@@ -1228,8 +1285,18 @@ int main(int argc, char *argv[])
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":ovdhu:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":fctovdhu:p:")) != -1) {
 		switch (c) {
+		case 'f':
+			options.opt_force_update = true;
+			options.opt_default = false;
+			break;
+		case 'c':
+			opt_no_colours = true;
+			break;
+		case 't':
+			opt_tags_only = true;
+			break;
 		case 'o':
 			options.opt_output_only = true;
 			options.opt_remote = false;
@@ -1270,6 +1337,8 @@ int main(int argc, char *argv[])
 
 	/* Some issue -- return */
 	if (exitflg) return exitflg;
+	
+	tzset(); /* Set timezone I do believe */
 
 	if (options.opt_username && options.opt_password) {
 		Print("Using:\n"
@@ -1303,11 +1372,13 @@ int main(int argc, char *argv[])
 	V("Looking in %s", filepath);
 	check_dir(filepath);
 
-	tzset(); /* Set timezone I do believe */
-
 	if (options.opt_output_only) {
 		output(filepath, "all");
 		options.opt_default = false;
+	}
+
+	if (options.opt_force_update) {
+		force_update(filepath, options.opt_username, options.opt_password);
 	}
 
 	if (options.opt_default) {
