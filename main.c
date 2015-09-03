@@ -1261,20 +1261,20 @@ int main(int argc, char *argv[])
 
 	struct {
 		bool	opt_remote;
-		bool	opt_output_only;
+		bool	opt_output;
 		bool	opt_warn;
 		bool	opt_check;
-		bool	opt_default;
+		bool	opt_autoupdate;
 		bool	opt_force_update;
 		char	*opt_username;
 		char	*opt_password;
 	} options;
 
-	options.opt_remote = true; /* Assume we are going to be downloading and therefore require username/pass */
-	options.opt_output_only = false;
+	options.opt_remote = false; /* We are going to be downloading and therefore require username/pass */
+	options.opt_output = false;
 	options.opt_warn = true;
 	options.opt_check = false;
-	options.opt_default = true;
+	options.opt_autoupdate = false;
 	options.opt_username = NULL;
 	options.opt_password = NULL;
 	options.opt_force_update = false;
@@ -1285,11 +1285,16 @@ int main(int argc, char *argv[])
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":fctovdhu:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":afctovdhu:p:")) != -1) {
 		switch (c) {
+		case 'a':
+			options.opt_autoupdate = true;
+			options.opt_remote = true;
+			break;
 		case 'f':
 			options.opt_force_update = true;
-			options.opt_default = false;
+			options.opt_autoupdate = false;
+			options.opt_remote = true;
 			break;
 		case 'c':
 			opt_no_colours = true;
@@ -1298,8 +1303,8 @@ int main(int argc, char *argv[])
 			opt_tags_only = true;
 			break;
 		case 'o':
-			options.opt_output_only = true;
-			options.opt_remote = false;
+			options.opt_output = true;
+			options.opt_autoupdate = false;
 			break;
 		case 'v':
 			opt_verbose = !opt_verbose;
@@ -1372,17 +1377,15 @@ int main(int argc, char *argv[])
 	V("Looking in %s", filepath);
 	check_dir(filepath);
 
-	if (options.opt_output_only) {
-		output(filepath, "all");
-		options.opt_default = false;
-	}
-
-	if (options.opt_force_update) {
+	if (options.opt_force_update && options.opt_remote) {
 		force_update(filepath, options.opt_username, options.opt_password);
 	}
 
-	if (options.opt_default) {
+	if (options.opt_autoupdate && options.opt_remote) {
 		auto_update(filepath, options.opt_username, options.opt_password);
+	}
+
+	if (options.opt_output) {
 		output(filepath, "all");
 	}
 
