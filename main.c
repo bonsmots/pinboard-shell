@@ -1176,7 +1176,7 @@ int auto_update(char *filepath, char *username, char *password)
 		}
 	}
 
-	output(filepath, "all");
+	//output(filepath, "all");
 	return 0;
 }
 
