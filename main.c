@@ -19,6 +19,11 @@
  * BUGS: '^' is used as a delimiter so this character in any input will mess
  * up the parsing TODO: search for ^ and replace with something else before
  * parsing, then replace back
+ *
+ * Descriptions or other fields containing " will break the parser. For this reason \" needs to be replaced with something else
+ *
+ * Incorrect user/pass not handled
+ *
  */
 
 /*
@@ -111,6 +116,11 @@
  * Macros
  */
 
+/* So we can easily send stderr to stdout */
+/* We have to make it NULL here to avoid compiler errors */
+FILE * se = NULL;
+/* FILE * se = stderr; */
+
 // TODO: clean these up a bit, duplicated functionality
 
 #define Trace() \
@@ -124,33 +134,33 @@
 #define Dbg(...) \
 { \
 	if (opt_debug) { \
-	fprintf(stderr, "Debug message: "); \
-	fprintf(stderr, __VA_ARGS__); \
-	fprintf(stderr, "\n"); \
+	fprintf(se, "Debug at line %i: ", __LINE__); \
+	fprintf(se, __VA_ARGS__); \
+	fprintf(se, "\n"); \
 	} \
 }
 
 #define Dbgnl(...) \
 { \
 	if (opt_debug) { \
-	fprintf(stderr, "Debug message: "); \
-	fprintf(stderr, __VA_ARGS__); \
+	fprintf(se, "Debug at line %i: ", __LINE__); \
+	fprintf(se, __VA_ARGS__); \
 	} \
 }
 
 #define V(...) \
 { \
 	if (opt_verbose) { \
-	fprintf(stderr, "Verbose: "); \
-	fprintf(stderr, __VA_ARGS__); \
-	fprintf(stderr, "\n"); \
+	fprintf(se, "Verbose: "); \
+	fprintf(se, __VA_ARGS__); \
+	fprintf(se, "\n"); \
 	} \
 }
 
 #define Se(...) \
 { \
-	fprintf(stderr, __VA_ARGS__); \
-	fprintf(stderr, "\n"); \
+	fprintf(se, __VA_ARGS__); \
+	fprintf(se, "\n"); \
 }
 
 #define Ftl(...) \
@@ -200,6 +210,20 @@
  * Helper functions
  */
 
+void swpch(char find[3], char replace[3], char *string, int string_length)
+{
+	char *p = string;
+	for (int i = 0; i < string_length; i++)
+	{
+		if (*p == find[0] && *(p+1) == find[1])
+		{
+		   	*p = replace[0];
+		   	*(p+1) = replace[1];
+		}
+		p++;
+	}
+}
+
 // TODO: obviously not secure
 char* ask_string(bool visible, char *message, char *input)
 {
@@ -241,6 +265,7 @@ bool	opt_debug = false;
 bool	opt_verbose = false;
 bool	opt_trace = false;
 bool	opt_tags_only = false;
+bool	opt_no_tags = false;
 bool 	opt_no_colours = false;
 /*
  * Other globals
@@ -531,7 +556,7 @@ int curl_grab(char *url, char *filepath, char *username, char *password)
 		res = curl_easy_perform(curl); /* Perform the request, res will get the return code */
 
 		if (res != CURLE_OK)								   /* Check for errors */
-			fprintf(stderr, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+			fprintf(se, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
 
 		curl_easy_cleanup(curl); /* always cleanup */
 	} else curl_success = false;
@@ -601,7 +626,7 @@ int pretty_json_output(char *filedir, char *verb)
 
 		if (rd == 0) {
 			if (!feof(fp)) {
-				fprintf(stderr, "error on file read.\n");
+				fprintf(se, "error on file read.\n");
 				retval = 1;
 			}
 			break;
@@ -627,7 +652,7 @@ int pretty_json_output(char *filedir, char *verb)
 
 	if (stat != yajl_status_ok) {
 		unsigned char  *str = yajl_get_error(hand, 1, fileData, rd);
-		fprintf(stderr, "%s", (const char *)str);
+		fprintf(se, "%s", (const char *)str);
 		yajl_free_error(hand, str);
 		retval = 1;
 	}
@@ -739,7 +764,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 ;
 	}
 
-	Dbg("Post tokenising:");
+	Dbg("Post tokenising, count is %i", count);
 	for (int j = 0; j < count; j++) {
 		/* If any of the tag strings are the strings we are interested in */
 		if (strstr(pairs[j].tag, "href") 
@@ -770,8 +795,11 @@ int parse_handoff(unsigned char *buf, size_t len)
 		}
 	}
 
+	if (!bm_count) return 0; /* Saves below being executed with 0 */
+
 	/* Index 0 is normal text control sequence */
-	Dbg("In bookmark array:");
+	Dbg("In bookmark array with %i bookmarks", bm_count);
+
 	for (int j = 0; j < bm_count; j++) {
 		/* No colours version */
 		if (opt_no_colours)
@@ -781,14 +809,14 @@ int parse_handoff(unsigned char *buf, size_t len)
 				printf("%s\n", bm[j].desc);
 				printf("%s\n", bm[j].href);
 			}
-			printf("%s\n", bm[j].tags);
+			if (!opt_no_tags) printf("%s\n", bm[j].tags);
 		} else {
 			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
 			if (!opt_tags_only) {
 				printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
 				printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
 			}
-			printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+			if (!opt_no_tags) printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
 		}
 		putchar('\n');
 	}
@@ -843,7 +871,7 @@ int output(char *filedir, char *verb)
 
 		if (rd == 0) {
 			if (!feof(fp)) {
-				fprintf(stderr, "error on file read.\n");
+				fprintf(se, "error on file read.\n");
 				retval = 1;
 			}
 			break;
@@ -870,7 +898,7 @@ int output(char *filedir, char *verb)
 	stat = yajl_complete_parse(hand);
 	if (stat != yajl_status_ok) {
 		unsigned char  *str = yajl_get_error(hand, 1, fileData, rd);
-		fprintf(stderr, "%s", (const char *)str);
+		fprintf(se, "%s", (const char *)str);
 		yajl_free_error(hand, str);
 		retval = 1;
 	}
@@ -884,20 +912,19 @@ int output(char *filedir, char *verb)
 
 // Reads file to freshly malloc'd char*
 // The return value will need freeing
-char * file_to_mem(char *directory, char *verb)
+char * file_to_mem(char *directory, char *verb, int *size)
 {
 	char			*filepath;
+	char			*data;
 	int				status;
 	int				fildes;
 	int				bytes_read = 1;
-	char			*data = NULL;
 	struct	stat	buffer;
 
 	Trace(); 
 
 	asprintf(&filepath, "%s/%s.json", directory, verb);
 	V("Opening file %s", filepath);
-
 	fildes = open(filepath, O_RDONLY);
 
 	if (fildes < 0)
@@ -906,9 +933,11 @@ char * file_to_mem(char *directory, char *verb)
 	status = fstat(fildes, &buffer);
 	close(fildes);
 
-	if (buffer.st_size > 1024) {
+    *size = buffer.st_size;
+    V("%ld bytes size, %d bytes", buffer.st_size, *size);
+	if (buffer.st_size > 1000000) {
 		//If more than a meg something is going wrong, bail
-		Ftl("File is more than a meg which doesn't make sense, bailing");
+		Ftl("File is %ld big which doesn't make sense, bailing", buffer.st_size);
 	} else {
 		data = malloc(buffer.st_size + 1);
 	}
@@ -918,14 +947,18 @@ char * file_to_mem(char *directory, char *verb)
 	while (bytes_read > 0)
 		bytes_read = read(fildes, data, buffer.st_size);
 
+
 	close(fildes);
 	free(filepath);
+
+    // NUL terminate
+    //*(data+1) = '\0';
 
 	return data;
 }
 
 /*
- * Copies a field in data_from to data_fo
+ * Copies a field in data_from to data_to
  *
  * field is the field we want e.g. 1, 2, 3 ... etc
  * delim is the delimiter character
@@ -996,6 +1029,39 @@ int check_update()
 	Trace(); 
 	puts("TODO: check for updates");
 	return 0;
+}
+
+int sanitise_json(char *directory)
+{
+	Trace(); 
+
+    char *b = NULL;
+    char *b2 = NULL;
+    int b_len;
+
+    b = file_to_mem(directory, "all", &b_len);
+    V("Read %d bytes from file_to_mem", b_len);
+    b2 = b;
+
+    swpch("\\\"", "--", b, b_len);
+
+    char *filename;
+	asprintf(&filename, "%s/%s.json", directory, "all_san");
+
+    FILE *fp = fopen(filename, "w");
+
+    if (fp == NULL)
+    {
+            printf("Error opening file!\n"); exit(1);
+    }
+
+    fputs(b2,fp); 
+    fclose(fp);
+
+    free(filename);
+    free(b);
+
+    return 0;
 }
 
 // Wrapper for downloading with the API
@@ -1108,6 +1174,7 @@ int auto_update(char *filepath, char *username, char *password)
 	char		b1[1024] = {0};
 	char	 	buffer[512];
 	double		time_since_update;
+    int         d_len;
 
 	time_t		api_update_time;
 	struct tm	api_update_time_tm;
@@ -1135,7 +1202,7 @@ int auto_update(char *filepath, char *username, char *password)
 	time_since_update = time_since_last_mod(buffer);
 
 	/* D/l if stale */
-	if (time_since_update >= (5 * 60)) /* If greater than 5 mins have elapsed */
+	if (time_since_update >= (30 * 60)) /* If greater than 30 mins have elapsed */
 	{
 		V("Looks stale, let's update");
 		api_download("update", username, password, filepath);
@@ -1144,7 +1211,7 @@ int auto_update(char *filepath, char *username, char *password)
 	}
 
 	/* See when update.json says we last updated */
-	d = file_to_mem(filepath, "update");
+	d = file_to_mem(filepath, "update", &d_len);
 	simple_parse_field(2, '"', d, b1, strlen(d));
 	free(d);
 
@@ -1235,7 +1302,7 @@ int main(int argc, char *argv[])
 	"-u username arg\n"
 	"-p password arg\n"
 	"-h this help\n"
-	"-l pipe through less\n"
+	"-w do not output tags\n"
 	"\n"
 	"Example usage:\n"
 	"Download bookmarks file from pinboard.in\n"
@@ -1244,11 +1311,10 @@ int main(int argc, char *argv[])
 	"Output only\n"
 	"./main -o\n"
 	"\n"
-	"Furhter Example usage:\n"
+	"Further Example usage:\n"
 	"List most frequent tags: pinboard-shell -otc | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
 	"List those tagged with $TAG for export to a file: pinboard-shell -oc | grep --color=never -B2 $TAG > $TAG.tagged\n"
 	"\n";
-
 
 	error_mode = 's'; /* Makes Stopif use abort() */
 
@@ -1262,6 +1328,7 @@ int main(int argc, char *argv[])
 	struct {
 		bool	opt_remote;
 		bool	opt_output;
+		bool	opt_sanitise;
 		bool	opt_warn;
 		bool	opt_check;
 		bool	opt_autoupdate;
@@ -1272,6 +1339,7 @@ int main(int argc, char *argv[])
 
 	options.opt_remote = false; /* We are going to be downloading and therefore require username/pass */
 	options.opt_output = false;
+	options.opt_sanitise = false;
 	options.opt_warn = true;
 	options.opt_check = false;
 	options.opt_autoupdate = false;
@@ -1283,10 +1351,16 @@ int main(int argc, char *argv[])
 	extern char	*optarg;
 	extern int	optind, optopt;
 
+    se = stdout;
+    /* se = stderr; */
+
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":afctovdhu:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":afctovdhswu:p:")) != -1) {
 		switch (c) {
+        case 's':
+            options.opt_sanitise = true;
+            break;
 		case 'a':
 			options.opt_autoupdate = true;
 			options.opt_remote = true;
@@ -1298,9 +1372,13 @@ int main(int argc, char *argv[])
 			break;
 		case 'c':
 			opt_no_colours = true;
+			Dbg("Printing with no colours");
 			break;
 		case 't':
 			opt_tags_only = true;
+			break;
+		case 'w':
+			opt_no_tags = true;
 			break;
 		case 'o':
 			options.opt_output = true;
@@ -1325,18 +1403,18 @@ int main(int argc, char *argv[])
 			asprintf(&options.opt_password, "%s", optarg);
 			break;
 		case ':':									   /* -u or -p without operand */
-			fprintf(stderr, "Option -%c requires an operand\n", optopt);
+			fprintf(se, "Option -%c requires an operand\n", optopt);
 			errflg = true;
 			break;
 		case '?':
-			fprintf(stderr, "Unrecognized option: -%c\n", optopt);
+			fprintf(se, "Unrecognized option: -%c\n", optopt);
 			errflg = true;
 		}
 	}
 
 	/* Some issue -- print usage message */
 	if (errflg) {
-		fprintf(stderr, "%s", msg_usage);
+		fprintf(se, "%s", msg_usage);
 		return 2;
 	}
 
@@ -1344,6 +1422,12 @@ int main(int argc, char *argv[])
 	if (exitflg) return exitflg;
 	
 	tzset(); /* Set timezone I do believe */
+
+    /* Tell user what is going on */ 
+	if (options.opt_warn) puts(msg_warn);
+    if (opt_verbose) V("Verbose mode on");
+    if (opt_trace) V("Tracing mode on");
+    if (opt_debug) V("Debugging mode on");
 
 	if (options.opt_username && options.opt_password) {
 		Print("Using:\n"
@@ -1363,8 +1447,6 @@ int main(int argc, char *argv[])
 			//asprintf(&opt_password, "%s", b1);
 		}
 	}
-
-	if (options.opt_warn) puts(msg_warn);
 
 	/*
 	 * Steps > See if JSON file exists and is not old > If not, download
@@ -1388,6 +1470,11 @@ int main(int argc, char *argv[])
 	if (options.opt_output) {
 		output(filepath, "all");
 	}
+
+    if (options.opt_sanitise) {
+        puts("Sanitize!\n");
+        sanitise_json(filepath);
+    }
 
 	free(filepath);
 
