@@ -22,7 +22,7 @@
  *
  * Descriptions or other fields containing " will break the parser. For this reason \" needs to be replaced with something else
  *
- * Incorrect user/pass not handled
+ * Incorrect user/pass not handled - should check for 401 response
  *
  */
 
