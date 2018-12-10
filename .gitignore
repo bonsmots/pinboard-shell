@@ -2,3 +2,4 @@ yajl/
 main
 main.dSYM/
 .DS_Store
+getenv

@@ -267,6 +267,23 @@ bool	opt_trace = false;
 bool	opt_tags_only = false;
 bool	opt_no_tags = false;
 bool 	opt_no_colours = false;
+
+/*
+ * More option globals
+ */
+
+struct {
+		bool	opt_remote;
+		bool	opt_output;
+		bool	opt_sanitise;
+		bool	opt_warn;
+		bool	opt_check;
+		bool	opt_autoupdate;
+		bool	opt_force_update;
+		char	*opt_username;
+		char	*opt_password;
+	} options;
+
 /*
  * Other globals
  */
@@ -809,14 +826,16 @@ int parse_handoff(unsigned char *buf, size_t len)
 				printf("%s\n", bm[j].desc);
 				printf("%s\n", bm[j].href);
 			}
-			if (!opt_no_tags) printf("%s\n", bm[j].tags);
+      /* Note we exclude tag string if short enough to be empty */
+			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) printf("%s\n", bm[j].tags);
 		} else {
 			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
 			if (!opt_tags_only) {
 				printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
 				printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
 			}
-			if (!opt_no_tags) printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+      /* Note we exclude tag string if short enough to be empty */
+			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
 		}
 		putchar('\n');
 	}
@@ -934,10 +953,10 @@ char * file_to_mem(char *directory, char *verb, int *size)
 	close(fildes);
 
     *size = buffer.st_size;
-    V("%ld bytes size, %d bytes", buffer.st_size, *size);
+    V("%lld bytes size, %d bytes", buffer.st_size, *size);
 	if (buffer.st_size > 1000000) {
 		//If more than a meg something is going wrong, bail
-		Ftl("File is %ld big which doesn't make sense, bailing", buffer.st_size);
+		Ftl("File is %lld big which doesn't make sense, bailing", buffer.st_size);
 	} else {
 		data = malloc(buffer.st_size + 1);
 	}
@@ -1277,15 +1296,39 @@ void force_update(char *filepath, char *username, char *password)
 	return;
 }
 
+void check_env_variables()
+{
+  char * s_user = "PB_USER";
+  char * s_pass = "PB_PASS";
+
+  Trace();
+
+  Dbg("getenv %s: %s", s_user, getenv(s_user));
+  Dbg("getenv %s: %s", s_pass, getenv(s_pass));
+
+  if (getenv(s_user) != NULL)
+    asprintf(&options.opt_username, "%s", getenv(s_user));
+
+  if (getenv(s_user) != NULL)
+    asprintf(&options.opt_password, "%s", getenv(s_pass));
+
+  return;
+}
+
+void dev_mode() 
+{
+  opt_debug = false;
+  opt_verbose = false;
+  opt_trace = true;
+}
+
 int main(int argc, char *argv[])
 {
 	/* Pointer to string of filepath where working files are located */
 	char		*filepath;
 
 	char		msg_warn[] =
-	"\n"
-	"NOTE: CURRENTLY STILL IN DEVELOPMENT\n"
-	"\n";
+	"NOTE: CURRENTLY STILL IN DEVELOPMENT";
 
 	char		msg_usage[] =
 	"______________\n"
@@ -1293,54 +1336,51 @@ int main(int argc, char *argv[])
 	"______________\n"
 	"\n"
 	"Usage:\n"
-	"-f force update\n" /* TODO: check flow control */
-	"-t print tags only\n"
+	"ADD: [TODO]\n"
+  "-n Name -l https://url.com/ \n"
+	"OUTPUT:\n"
+	"-o output: without this flag no output of data from pinboard.in\n"
+	"-w do not output tags\n"
+	"-t toggle tags only\n"
+  "\n"
+	"-a auto update: updates if the API says it has updated since last downloaded\n"
+	"-f force update: forces update, useful if error\n" /* TODO: check flow control */
+  "\n"
 	"-c turn off formatting e.g. for redirecting stdout to a file\n"
-	"-o output only, do not autoupdate\n"
+  "\n"
 	"-v toggle verbose\n" 
 	"-d turn debug mode on\n"
+  "\n"
 	"-u username arg\n"
 	"-p password arg\n"
+  "\n"
 	"-h this help\n"
-	"-w do not output tags\n"
 	"\n"
 	"Example usage:\n"
 	"Download bookmarks file from pinboard.in\n"
-	"./main\n"
+	"./main -f\n"
 	"OR\n"
 	"Output only\n"
 	"./main -o\n"
 	"\n"
 	"Further Example usage:\n"
+	"CHECK ME:\n" /* TODO: these need checking */
 	"List most frequent tags: pinboard-shell -otc | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
 	"List those tagged with $TAG for export to a file: pinboard-shell -oc | grep --color=never -B2 $TAG > $TAG.tagged\n"
 	"\n";
 
 	error_mode = 's'; /* Makes Stopif use abort() */
+  dev_mode();
 
 	int		c;
 	bool	errflg = false;
 	int		exitflg = 0;
 	int		ret = 0;
 
-	/* NEW BOOKMARK */
-
-	struct {
-		bool	opt_remote;
-		bool	opt_output;
-		bool	opt_sanitise;
-		bool	opt_warn;
-		bool	opt_check;
-		bool	opt_autoupdate;
-		bool	opt_force_update;
-		char	*opt_username;
-		char	*opt_password;
-	} options;
-
+	
 	options.opt_remote = false; /* We are going to be downloading and therefore require username/pass */
 	options.opt_output = false;
 	options.opt_sanitise = false;
-	options.opt_warn = true;
 	options.opt_check = false;
 	options.opt_autoupdate = false;
 	options.opt_username = NULL;
@@ -1353,6 +1393,7 @@ int main(int argc, char *argv[])
 
     se = stdout;
     /* se = stderr; */
+    
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
@@ -1412,6 +1453,14 @@ int main(int argc, char *argv[])
 		}
 	}
 
+  /* Tell user what is going on */ 
+	puts(msg_warn);
+  if (opt_verbose) V("Verbose mode on");
+  if (opt_trace) V("Tracing mode on");
+  if (opt_debug) V("Debugging mode on");
+
+  check_env_variables(); /* Checks env variables for user/pass combo */
+
 	/* Some issue -- print usage message */
 	if (errflg) {
 		fprintf(se, "%s", msg_usage);
@@ -1423,13 +1472,7 @@ int main(int argc, char *argv[])
 	
 	tzset(); /* Set timezone I do believe */
 
-    /* Tell user what is going on */ 
-	if (options.opt_warn) puts(msg_warn);
-    if (opt_verbose) V("Verbose mode on");
-    if (opt_trace) V("Tracing mode on");
-    if (opt_debug) V("Debugging mode on");
-
-	if (options.opt_username && options.opt_password) {
+  if (options.opt_username && options.opt_password) {
 		Print("Using:\n"
 		      "%s as username\n"
 		      "%s as password", options.opt_username, options.opt_password);
@@ -1471,12 +1514,14 @@ int main(int argc, char *argv[])
 		output(filepath, "all");
 	}
 
-    if (options.opt_sanitise) {
-        puts("Sanitize!\n");
-        sanitise_json(filepath);
-    }
+  if (options.opt_sanitise) {
+    puts("Sanitize!\n");
+    sanitise_json(filepath);
+  }
 
 	free(filepath);
+	free(options.opt_username);
+	free(options.opt_password);
 
 	return ret;
 }
