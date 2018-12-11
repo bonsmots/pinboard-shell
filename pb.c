@@ -112,99 +112,7 @@
 #include "yajl/yajl_gen.h"
 #include "yajl/yajl_tree.h"
 
-/*
- * Macros
- */
-
-/* So we can easily send stderr to stdout */
-/* We have to make it NULL here to avoid compiler errors */
-FILE * se = NULL;
-/* FILE * se = stderr; */
-
-// TODO: clean these up a bit, duplicated functionality
-
-#define Trace() \
-{ \
-	if (opt_trace) { \
-	fprintf(stdout, "Trace: %s at line %i", __FUNCTION__, __LINE__); \
-	fprintf(stdout, "\n"); \
-	} \
-}
-
-#define Dbg(...) \
-{ \
-	if (opt_debug) { \
-	fprintf(se, "Debug at line %i: ", __LINE__); \
-	fprintf(se, __VA_ARGS__); \
-	fprintf(se, "\n"); \
-	} \
-}
-
-#define Dbgnl(...) \
-{ \
-	if (opt_debug) { \
-	fprintf(se, "Debug at line %i: ", __LINE__); \
-	fprintf(se, __VA_ARGS__); \
-	} \
-}
-
-#define V(...) \
-{ \
-	if (opt_verbose) { \
-	fprintf(se, "Verbose: "); \
-	fprintf(se, __VA_ARGS__); \
-	fprintf(se, "\n"); \
-	} \
-}
-
-#define Se(...) \
-{ \
-	fprintf(se, __VA_ARGS__); \
-	fprintf(se, "\n"); \
-}
-
-#define Ftl(...) \
-{ \
-	Dbg(__VA_ARGS__); \
-	abort(); \
-}
-
-#define Print(...) \
-{ \
-	fprintf(stdout, "At %i: ", __LINE__); \
-	fprintf(stdout, __VA_ARGS__); \
-	fprintf(stdout, "\n"); \
-}
-
-// Replaces f with r in string
-#define Charrep(f, r, string, len) \
-{ \
-	char *pointer = string; \
-	for (int j = 0; j < len; j++) { \
-		if (*pointer == f) \
-			*pointer = r; \
-		pointer++; \
-	} \
-}
-
-// Initialise bookmarks array as NULLs
-#define Null_bookmarks(array, items) \
-{ \
-	for (int counter = 0; counter < items; counter++) { \
-		array[counter].hash = NULL;\
-		array[counter].href = NULL;\
-		array[counter].desc = NULL;\
-		array[counter].tags = NULL;\
-	}\
-}
-
-// Zero char buffer
-#define Zero_char(array, items) \
-{ \
-	for (int counter = 0; counter < items; counter++) { \
-		array[counter]= 0;\
-	}\
-}
+#include "macros.h"
 
 /*
  * Helper functions
@@ -240,30 +148,12 @@ int strval(char *str)
 }
 
 /*
- * Stopif -- macro from 21stC C by Ben Klemens
- */
-
-/** Set this to \c 's' to stop the program on an error.
- * Otherwise, functions return a value on failure.*/
-char	error_mode;
-/** To where should I write errors? If this is \c NULL, write to \c stderr. */
-FILE	*error_log;
-#define Stopif(assertion, error_action, ...) \
-if (assertion) \
-{ \
-	fprintf(error_log ? error_log : stderr, __VA_ARGS__); \
-	fprintf(error_log ? error_log : stderr, "\n"); \
-	if (error_mode=='s') abort(); \
-	else {error_action;} \
-}
-
-/*
  * Option globals
  */
 
 bool	opt_debug = false;
 bool	opt_verbose = false;
-bool	opt_trace = false;
+bool	opt_trace = true;
 bool	opt_tags_only = false;
 bool	opt_no_tags = false;
 bool 	opt_no_colours = false;
@@ -282,6 +172,8 @@ struct {
 		bool	opt_force_update;
 		char	*opt_username;
 		char	*opt_password;
+		char	*opt_add_url;
+		char	*opt_add_title;
 	} options;
 
 /*
@@ -352,7 +244,6 @@ static int reformat_start_map(void *ctx)
 	yajl_gen	g = (yajl_gen) ctx;
 	return yajl_gen_status_ok == yajl_gen_map_open(g);
 }
-
 
 static int reformat_end_map(void *ctx)
 {
@@ -584,6 +475,36 @@ int curl_grab(char *url, char *filepath, char *username, char *password)
 	else return -1;
 }
 
+int curl_jam(char *url, char *username, char *password)
+{
+	CURL		*curl;
+	CURLcode	res;
+	bool		curl_success;
+
+	Trace(); 
+
+	if (!strval(username) || !strval(password))
+		return -1;
+
+	curl = curl_easy_init();
+	if (curl) {
+		curl_success = true;
+		curl_easy_setopt(curl, CURLOPT_URL, url);
+		curl_easy_setopt(curl, CURLOPT_USERNAME, username);
+		curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
+		//curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect
+		res = curl_easy_perform(curl); /* Perform the request, res will get the return code */
+
+		if (res != CURLE_OK)								   /* Check for errors */
+			fprintf(se, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
+
+		curl_easy_cleanup(curl); /* always cleanup */
+	} else curl_success = false;
+
+	if (curl_success) return 0;
+	else return -1;
+}
+
 // Crudely prints file to stdout
 int simple_output(char *filedir, char *verb)
 {
@@ -789,7 +710,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 				|| strstr(pairs[j].tag, "tags") 
 				|| strstr(pairs[j].tag, "hash"))
 		{
-			Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
+			//Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
 
 			/* Put the values in */
 			/* strstr() returns the pointer to first occurance of substring in the sring */
@@ -827,7 +748,8 @@ int parse_handoff(unsigned char *buf, size_t len)
 				printf("%s\n", bm[j].href);
 			}
       /* Note we exclude tag string if short enough to be empty */
-			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) printf("%s\n", bm[j].tags);
+			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) 
+        printf("%s\n", bm[j].tags);
 		} else {
 			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
 			if (!opt_tags_only) {
@@ -835,9 +757,11 @@ int parse_handoff(unsigned char *buf, size_t len)
 				printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
 			}
       /* Note we exclude tag string if short enough to be empty */
-			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) {
+        printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+      }
 		}
-		putchar('\n');
+    //putchar('\n');
 	}
 
 	/* Free strings created with stdup */
@@ -1083,6 +1007,40 @@ int sanitise_json(char *directory)
     return 0;
 }
 
+int api_add(char *username, char *password, char *webaddr, char *title)
+{
+  char		*url;
+  char *escaped;
+  int retval = -1;
+	Trace(); 
+
+  if (!strval(username) 
+      || !strval(password)
+      || !strval(webaddr)
+      || !strval(title))
+		return -1;
+
+  CURL		*curl;
+	curl = curl_easy_init();
+  escaped = curl_easy_escape(curl, webaddr, 0);
+  puts(escaped);
+  
+	asprintf(&url, 
+      "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", 
+      escaped, title); 
+
+  Print("Using:\n"
+	      "%s as URL\n"
+		  "%s/%s as username/pass", url, username, password);
+
+  retval = curl_jam(url, username, password);
+
+	free(url);
+  curl_free(escaped);
+  curl_easy_cleanup(curl); /* always cleanup */
+  return retval;
+}
+
 // Wrapper for downloading with the API
 int api_download(char *verb, char *username, char *password, char *directory)
 {
@@ -1315,17 +1273,10 @@ void check_env_variables()
   return;
 }
 
-void dev_mode() 
-{
-  opt_debug = false;
-  opt_verbose = false;
-  opt_trace = true;
-}
-
 int main(int argc, char *argv[])
 {
 	/* Pointer to string of filepath where working files are located */
-	char		*filepath;
+	char		*filepath = NULL;
 
 	char		msg_warn[] =
 	"NOTE: CURRENTLY STILL IN DEVELOPMENT";
@@ -1337,22 +1288,19 @@ int main(int argc, char *argv[])
 	"\n"
 	"Usage:\n"
 	"ADD: [TODO]\n"
-  "-n Name -l https://url.com/ \n"
+  "-t Title -u https://url.com/ \n"
 	"OUTPUT:\n"
 	"-o output: without this flag no output of data from pinboard.in\n"
 	"-w do not output tags\n"
-	"-t toggle tags only\n"
+	"-c toggle tags only\n"
   "\n"
 	"-a auto update: updates if the API says it has updated since last downloaded\n"
 	"-f force update: forces update, useful if error\n" /* TODO: check flow control */
   "\n"
-	"-c turn off formatting e.g. for redirecting stdout to a file\n"
+	"-p turn off formatting e.g. for redirecting stdout to a file\n"
   "\n"
 	"-v toggle verbose\n" 
 	"-d turn debug mode on\n"
-  "\n"
-	"-u username arg\n"
-	"-p password arg\n"
   "\n"
 	"-h this help\n"
 	"\n"
@@ -1365,13 +1313,11 @@ int main(int argc, char *argv[])
 	"\n"
 	"Further Example usage:\n"
 	"CHECK ME:\n" /* TODO: these need checking */
-	"List most frequent tags: pinboard-shell -otc | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
-	"List those tagged with $TAG for export to a file: pinboard-shell -oc | grep --color=never -B2 $TAG > $TAG.tagged\n"
+	"List most frequent tags: pb -ocp | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
+	"List those tagged with $TAG for export to a file: pb -op | grep --color=never -B2 $TAG > $TAG.tagged\n"
 	"\n";
 
 	error_mode = 's'; /* Makes Stopif use abort() */
-  dev_mode();
-
 	int		c;
 	bool	errflg = false;
 	int		exitflg = 0;
@@ -1397,59 +1343,66 @@ int main(int argc, char *argv[])
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":afctovdhswu:p:")) != -1) {
+	while ((c = getopt(argc, argv, ":afcovdhswpu:t:")) != -1) {
 		switch (c) {
-        case 's':
-            options.opt_sanitise = true;
-            break;
-		case 'a':
-			options.opt_autoupdate = true;
-			options.opt_remote = true;
-			break;
-		case 'f':
-			options.opt_force_update = true;
-			options.opt_autoupdate = false;
-			options.opt_remote = true;
-			break;
-		case 'c':
-			opt_no_colours = true;
-			Dbg("Printing with no colours");
-			break;
-		case 't':
-			opt_tags_only = true;
-			break;
-		case 'w':
-			opt_no_tags = true;
-			break;
-		case 'o':
-			options.opt_output = true;
-			options.opt_autoupdate = false;
-			break;
-		case 'v':
-			opt_verbose = !opt_verbose;
-			break;
-		case 'd':
-			opt_verbose = true;
-			opt_trace = true;
-			opt_debug = true;
-			error_mode = 's';							   /* Makes Stopif use * abort() */
-			break;
-		case 'h':
-			errflg = true;
-			break;
-		case 'u':
-			asprintf(&options.opt_username, "%s", optarg);
-			break;
-		case 'p':
-			asprintf(&options.opt_password, "%s", optarg);
-			break;
-		case ':':									   /* -u or -p without operand */
-			fprintf(se, "Option -%c requires an operand\n", optopt);
-			errflg = true;
-			break;
-		case '?':
-			fprintf(se, "Unrecognized option: -%c\n", optopt);
-			errflg = true;
+      case 's':
+        options.opt_sanitise = true;
+        break;
+      case 'a':
+        options.opt_autoupdate = true;
+        options.opt_remote = true;
+        Dbg("Autoupdate");
+        break;
+      case 'f':
+        options.opt_force_update = true;
+        options.opt_autoupdate = false;
+        options.opt_remote = true;
+        Dbg("Forced update");
+        break;
+      case 'p':
+        opt_no_colours = true;
+        Dbg("Printing with no colours");
+        break;
+      case 'c':
+        opt_tags_only = true;
+        Dbg("Tags only");
+        break;
+      case 'w':
+        opt_no_tags = true;
+        Dbg("No tags");
+        break;
+      case 'o':
+        options.opt_output = true;
+        options.opt_autoupdate = false;
+        Dbg("Output");
+        break;
+      case 'v':
+        opt_verbose = !opt_verbose;
+        Dbg("Verbose toggled");
+        break;
+      case 'd':
+        opt_verbose = true;
+        opt_trace = true;
+        opt_debug = true;
+        error_mode = 's';							   /* Makes Stopif use * abort() */
+        Dbg("Debug mode set");
+        break;
+      case 'h':
+        errflg = true; // i.e. show help
+        break;
+      case 't':
+        asprintf(&options.opt_add_title, "%s", optarg);
+        break;
+      case 'u':
+        asprintf(&options.opt_add_url, "%s", optarg);
+        break;
+      case ':':									   /* Option req argument without argument */
+        fprintf(se, "Option -%c requires an operand\n", optopt);
+        errflg = true;
+        break;
+      case '?':
+        fprintf(se, "Unrecognized option: -%c\n", optopt);
+        errflg = true;
 		}
 	}
 
@@ -1491,6 +1444,12 @@ int main(int argc, char *argv[])
 		}
 	}
 
+  /* If these are both set we want to add and then quit */
+  if (strval(options.opt_add_url) && strval(options.opt_add_title)) {
+     api_add(options.opt_username, options.opt_password, options.opt_add_url, options.opt_add_title);
+      goto bye;
+  }
+
 	/*
 	 * Steps > See if JSON file exists and is not old > If not, download
 	 * with libcurl > Parse > Output > Other functions if required
@@ -1519,9 +1478,10 @@ int main(int argc, char *argv[])
     sanitise_json(filepath);
   }
 
-	free(filepath);
-	free(options.opt_username);
-	free(options.opt_password);
+bye:
+	Sfree(filepath);
+	Sfree(options.opt_username);
+	Sfree(options.opt_password);
 
 	return ret;
 }
