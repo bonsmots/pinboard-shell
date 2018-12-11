@@ -113,39 +113,7 @@
 #include "yajl/yajl_tree.h"
 
 #include "macros.h"
-
-/*
- * Helper functions
- */
-
-void swpch(char find[3], char replace[3], char *string, int string_length)
-{
-	char *p = string;
-	for (int i = 0; i < string_length; i++)
-	{
-		if (*p == find[0] && *(p+1) == find[1])
-		{
-		   	*p = replace[0];
-		   	*(p+1) = replace[1];
-		}
-		p++;
-	}
-}
-
-// TODO: obviously not secure
-char* ask_string(bool visible, char *message, char *input)
-{
-	printf("%s", message);
-	scanf("%s", input);
-	return input;
-}
-
-// Returns string length if not NULL
-int strval(char *str)
-{
-	if (str) return strlen(str);
-	else return 0;
-}
+#include "helper.c"
 
 /*
  * Option globals
@@ -157,6 +125,8 @@ bool	opt_trace = true;
 bool	opt_tags_only = false;
 bool	opt_no_tags = false;
 bool 	opt_no_colours = false;
+bool 	opt_hashes = false;
+bool 	opt_del = false;
 
 /*
  * More option globals
@@ -174,6 +144,7 @@ struct {
 		char	*opt_password;
 		char	*opt_add_url;
 		char	*opt_add_title;
+		char	*opt_search_str;
 	} options;
 
 /*
@@ -603,6 +574,20 @@ int pretty_json_output(char *filedir, char *verb)
 	return retval;
 }
 
+void del_me(char *url)
+{
+  printf("Delete!\n");
+}
+
+void del_prompt(char *url)
+{
+  char b1[512];
+  puts(url);
+  ask_string("Do you want to delete this URL (y/n?) ", b1);
+  puts("");
+  if (strcasestr(b1,"y")) del_me(url);
+}
+
 int parse_handoff(unsigned char *buf, size_t len)
 {
 	/*
@@ -710,8 +695,6 @@ int parse_handoff(unsigned char *buf, size_t len)
 				|| strstr(pairs[j].tag, "tags") 
 				|| strstr(pairs[j].tag, "hash"))
 		{
-			//Dbgnl("%s:%s\n", pairs[j].tag, pairs[j].value);
-
 			/* Put the values in */
 			/* strstr() returns the pointer to first occurance of substring in the sring */
 			/* Point the bm struct pointers to the values in the pair structs */
@@ -738,27 +721,56 @@ int parse_handoff(unsigned char *buf, size_t len)
 	/* Index 0 is normal text control sequence */
 	Dbg("In bookmark array with %i bookmarks", bm_count);
 
+  /* 
+   * OUTPUT LOOP
+   */
+
 	for (int j = 0; j < bm_count; j++) {
-		/* No colours version */
-		if (opt_no_colours)
-		{
-			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
-			if (!opt_tags_only) {
-				printf("%s\n", bm[j].desc);
-				printf("%s\n", bm[j].href);
-			}
-      /* Note we exclude tag string if short enough to be empty */
-			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) 
-        printf("%s\n", bm[j].tags);
-		} else {
-			//printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
-			if (!opt_tags_only) {
-				printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
-				printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
-			}
-      /* Note we exclude tag string if short enough to be empty */
-			if (!opt_no_tags && (strlen(bm[j].tags) > 1)) {
-        printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+    // If this is set we are searching, otherwise we are listing
+    if (strval(options.opt_search_str))
+      {
+        if ((strcasestr(bm[j].hash,options.opt_search_str) != NULL)         
+          || (strcasestr(bm[j].desc,options.opt_search_str) != NULL)        
+          || (strcasestr(bm[j].href,options.opt_search_str) != NULL))
+        {
+          if (opt_no_colours) {
+            if (opt_hashes) printf("%s\n", bm[j].hash);
+            printf("%s\n", bm[j].desc);
+            printf("%s\n", bm[j].href);
+          } else {
+            if (opt_hashes) printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+            printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
+            printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+          }
+          if (opt_del)
+            del_prompt(bm[j].desc);
+        }
+      }
+      else
+      {
+      /* No colours version */
+      if (opt_no_colours)
+      {
+        //printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+        if (!opt_tags_only) {
+          if (opt_hashes) printf("%s\n", bm[j].hash);
+          printf("%s\n", bm[j].desc);
+          printf("%s\n", bm[j].href);
+        }
+        /* Note we exclude tag string if short enough to be empty */
+        if (!opt_no_tags && (strlen(bm[j].tags) > 1)) 
+          printf("%s\n", bm[j].tags);
+      } else {
+        //printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+        if (!opt_tags_only) {
+          if (opt_hashes) printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+          printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
+          printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+        }
+        /* Note we exclude tag string if short enough to be empty */
+        if (!opt_no_tags && (strlen(bm[j].tags) > 1)) {
+          printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+       }
       }
 		}
     //putchar('\n');
@@ -1287,21 +1299,23 @@ int main(int argc, char *argv[])
 	"______________\n"
 	"\n"
 	"Usage:\n"
-	"ADD: [TODO]\n"
-  "-t Title -u https://url.com/ \n"
-	"OUTPUT:\n"
-	"-o output: without this flag no output of data from pinboard.in\n"
+	"ADD:\n"
+  "-t Title -u \"https://url.com/\" \n"
+	"DELETE:\n"
+  "-r \"string\" < Yet to be implimented\n"
+  "SEARCH:\n"
+  "-z \"string\"\n"
+	"LIST:\n"
+	"-o flag to list data\n"
 	"-w do not output tags\n"
 	"-c toggle tags only\n"
-  "\n"
+	"-p turn off formatting e.g. for redirecting stdout to a file\n"
+	"UPDATE:\n"
 	"-a auto update: updates if the API says it has updated since last downloaded\n"
 	"-f force update: forces update, useful if error\n" /* TODO: check flow control */
-  "\n"
-	"-p turn off formatting e.g. for redirecting stdout to a file\n"
-  "\n"
+  "OTHER:\n"
 	"-v toggle verbose\n" 
 	"-d turn debug mode on\n"
-  "\n"
 	"-h this help\n"
 	"\n"
 	"Example usage:\n"
@@ -1343,8 +1357,13 @@ int main(int argc, char *argv[])
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":afcovdhswpu:t:")) != -1) {
+	while ((c = getopt(argc, argv, ":afcovdhswpu:t:z:r:")) != -1) {
 		switch (c) {
+      case 'z':
+        options.opt_output = true;
+        asprintf(&options.opt_search_str, "%s", optarg);
+        Dbg("Searching");
+        break;
       case 's':
         options.opt_sanitise = true;
         break;
@@ -1390,6 +1409,12 @@ int main(int argc, char *argv[])
       case 'h':
         errflg = true; // i.e. show help
         break;
+      case 'r':
+        opt_del = true;
+        options.opt_output = true;
+        asprintf(&options.opt_search_str, "%s", optarg);
+        Dbg("Deleting");
+        break;
       case 't':
         asprintf(&options.opt_add_title, "%s", optarg);
         break;
@@ -1433,7 +1458,7 @@ int main(int argc, char *argv[])
 		char b1[512];
 		if (!options.opt_username) { 
 			Zero_char(b1, sizeof(b1));
-			ask_string(true, "Username: ", b1);
+			ask_string("Username: ", b1);
 			asprintf(&options.opt_username, "%s", b1);
 		}
 		if (!options.opt_password) {
