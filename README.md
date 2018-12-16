@@ -1,6 +1,10 @@
 pinboard-shell
 ==============
 
+Looks like:
+
+![Screenshot](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screenshot.png)
+
 Note: requires cmake and glib2. It also uses the yajl library. 
 
 For yajl see <https://github.com/lloyd/yajl>
