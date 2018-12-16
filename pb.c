@@ -1,33 +1,24 @@
+/* Next: ipliment delete, update readme with screenshots */
+
 /*
- * pinboard-shell
+ * pb a.k.a. pinboard-shell
  *
- * Downloads, parses and prints JSON data from pinboard.in
+ * Lists bookmarks, adds, deletes bookmarks from pinboard.in from the shell
+ *
+ * Written in C99
+ *
+ * pinboard.in login required
  *
  * Uses libcurl, YAJL
  *
- */
-
-/*
  * NOTE:
  * YAJL needs cmake.
- * To build: cd yayl/ && ./configure && make
  *
- * -I yajl/build/yajl-2.1.1/include -L yajl/build/yajl-2.1.1/lib
- */
-
-/*
- * BUGS: '^' is used as a delimiter so this character in any input will mess
- * up the parsing TODO: search for ^ and replace with something else before
- * parsing, then replace back
+ * To install cmake on OSX with homebrew: brew cask install cmake
  *
- * Descriptions or other fields containing " will break the parser. For this reason \" needs to be replaced with something else
+ * To build yajl: cd yajl/ && ./configure && make
  *
- * Incorrect user/pass not handled - should check for 401 response
- *
- */
-
-/*
- * libcurl
+ * To then build pb: cd .. && make
  */
 
 /*
@@ -60,10 +51,6 @@
  */
 
 /*
- * YAJL
- */
-
-/*
  * This software makes use of the YAJL library, which is released under the
  * ISC license. More info on YAJL can be found at
  * <https://github.com/lloyd/yajl>
@@ -86,6 +73,12 @@
  */
 
 /*
+ * BUGS: Descriptions or other fields containing " within them will break the parser.
+ * TODO: search for ^ and replace with something else before parsing, then replace back
+ * TODO: Incorrect user/pass not handled - should check for 401 response
+ */
+
+/*
  * Headers -- global
  */
 
@@ -93,16 +86,16 @@
 #define _GNU_SOURCE // required on linux for asprintf
 #endif
 
-#include <stdio.h> // usual
-#include <stdlib.h> //abort, getenv
-#include <curl/curl.h> // curl
-#include <sys/stat.h>
-#include <sys/types.h>
+#include <stdbool.h> // C99 bool type
+#include <stdio.h> // stdout
+#include <stdlib.h> // abort, getenv
 #include <fcntl.h> // open
 #include <unistd.h> // close, getopt, getpass
 #include <string.h> // strstr, strdup, strtok
-#include <stdbool.h> // C99 includes bool type
 #include <time.h> // time types
+#include <curl/curl.h> // curl
+#include <sys/stat.h> // fstat
+#include <sys/types.h> // time_t etc
 
 /*
  * Headers -- local
@@ -119,33 +112,34 @@
  * Option globals
  */
 
-bool	opt_debug = false;
-bool	opt_verbose = false;
-bool	opt_trace = true;
-bool	opt_tags_only = false;
-bool	opt_no_tags = false;
-bool 	opt_no_colours = false;
-bool 	opt_hashes = false;
-bool 	opt_del = false;
 
 /*
  * More option globals
+ * Note: not in the options struct for ease w/ macros 
  */
 
+bool opt_debug;
+bool opt_verbose;
+bool opt_trace;
+
 struct {
-		bool	opt_remote;
-		bool	opt_output;
-		bool	opt_sanitise;
-		bool	opt_warn;
-		bool	opt_check;
-		bool	opt_autoupdate;
-		bool	opt_force_update;
-		char	*opt_username;
-		char	*opt_password;
-		char	*opt_add_url;
-		char	*opt_add_title;
-		char	*opt_search_str;
-	} options;
+		bool	remote;
+		bool	output;
+		bool	autoupdate;
+		bool	force_update;
+    bool 	del;
+    bool 	add;
+    bool 	hashes;
+    bool 	no_colours;
+    bool	no_tags;
+    bool	tags_only;
+
+		char	*username;
+		char	*password;
+		char	*add_url;
+		char	*add_title;
+		char	*search_str;
+} options;
 
 /*
  * Other globals
@@ -175,7 +169,7 @@ typedef struct {
 }	bookmark;
 
 /*
- * YAJL callback functions -- these are a lift from the YAJL documentation
+ * YAJL callback functions -- per the YAJL documentation
  */
 
 static int reformat_null(void *ctx)
@@ -268,9 +262,10 @@ int check_dir(char *dirpath)
 		// TODO: should change this to tighter permissions
 		status = mkdir(dirpath, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		/*
-		 * S_IRWXU read, write, execute/search by owner S_IRWXG read,
-		 * write, execute/search by group S_IROTH read permission,
-		 * others S_IXOTH execute/search permission, others
+		 * S_IRWXU read, write, execute/search by owner 
+     * S_IRWXG read, * write, execute/search by group 
+     * S_IROTH read permission, others 
+     * S_IXOTH execute/search permission, others
 		 */
 		Stopif(status != 0, return -1, "Make folder %s failed.", dirpath);
 	}
@@ -282,7 +277,7 @@ int check_dir(char *dirpath)
 
 	/* Check directory, readable, writeable */
 	if (S_ISDIR(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
-		Dbg("We are in business, directory has sensible perminssions");
+		Dbg("Directory fine");
 	} else {
 		Dbg("Not a directory or not read/writable");
 	}
@@ -606,7 +601,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	Trace(); 
 
-	Dbg("Len is %zu", len);
+	Dbg("%zu bytes (%zu kbs) of JSON data" , len, len / 1000);
 
 	/* Zero our output buffer */
 	for (int j = 0; j < len; j++) {
@@ -616,6 +611,9 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	spare = out;
 	loc = buf;
+
+  /* Even though this seems sensible it seems to reduce the output and so somehow messes up the count */
+  //swpch("\\\"", "\'\'", buf, len);
 
 	/*
 	 * The below removes everyting except tag and value, adding sep
@@ -687,7 +685,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 ;
 	}
 
-	Dbg("Post tokenising, count is %i", count);
+	Dbg("Tokenising complete on %i strings", count);
 	for (int j = 0; j < count; j++) {
 		/* If any of the tag strings are the strings we are interested in */
 		if (strstr(pairs[j].tag, "href") 
@@ -718,7 +716,6 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	if (!bm_count) return 0; /* Saves below being executed with 0 */
 
-	/* Index 0 is normal text control sequence */
 	Dbg("In bookmark array with %i bookmarks", bm_count);
 
   /* 
@@ -727,48 +724,48 @@ int parse_handoff(unsigned char *buf, size_t len)
 
 	for (int j = 0; j < bm_count; j++) {
     // If this is set we are searching, otherwise we are listing
-    if (strval(options.opt_search_str))
+    if (strval(options.search_str))
       {
-        if ((strcasestr(bm[j].hash,options.opt_search_str) != NULL)         
-          || (strcasestr(bm[j].desc,options.opt_search_str) != NULL)        
-          || (strcasestr(bm[j].href,options.opt_search_str) != NULL))
+        if ((strcasestr(bm[j].hash,options.search_str) != NULL)         
+          || (strcasestr(bm[j].desc,options.search_str) != NULL)        
+          || (strcasestr(bm[j].href,options.search_str) != NULL))
         {
-          if (opt_no_colours) {
-            if (opt_hashes) printf("%s\n", bm[j].hash);
+          if (options.no_colours) {
+            if (options.hashes) printf("%s\n", bm[j].hash);
             printf("%s\n", bm[j].desc);
             printf("%s\n", bm[j].href);
           } else {
-            if (opt_hashes) printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+            if (options.hashes) printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
             printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
             printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
           }
-          if (opt_del)
+          if (options.del)
             del_prompt(bm[j].desc);
         }
       }
       else
       {
       /* No colours version */
-      if (opt_no_colours)
+      if (options.no_colours)
       {
         //printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
-        if (!opt_tags_only) {
-          if (opt_hashes) printf("%s\n", bm[j].hash);
+        if (!options.tags_only) {
+          if (options.hashes) printf("%s\n", bm[j].hash);
           printf("%s\n", bm[j].desc);
           printf("%s\n", bm[j].href);
         }
         /* Note we exclude tag string if short enough to be empty */
-        if (!opt_no_tags && (strlen(bm[j].tags) > 1)) 
+        if (!options.no_tags && (strlen(bm[j].tags) > 1)) 
           printf("%s\n", bm[j].tags);
       } else {
         //printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
-        if (!opt_tags_only) {
-          if (opt_hashes) printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+        if (!options.tags_only) {
+          if (options.hashes) printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
           printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
           printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
         }
         /* Note we exclude tag string if short enough to be empty */
-        if (!opt_no_tags && (strlen(bm[j].tags) > 1)) {
+        if (!options.no_tags && (strlen(bm[j].tags) > 1)) {
           printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
        }
       }
@@ -806,7 +803,7 @@ int output(char *filedir, char *verb)
 	if (!fp)
 		return -1;
 	else
-		Dbg("Output open suceeded");
+		Dbg("JSON input found");
 
 	/* ? */
 	g = yajl_gen_alloc(NULL);
@@ -844,7 +841,7 @@ int output(char *filedir, char *verb)
 			size_t		len;
 
 			yajl_gen_get_buf(g, &buf, &len);
-			Dbg("Handing off");
+			Dbg("Parsing");
 			parse_handoff((unsigned char *)buf, len);
 			yajl_gen_clear(g);
 		}
@@ -986,6 +983,7 @@ int check_update()
 	return 0;
 }
 
+/* Unused
 int sanitise_json(char *directory)
 {
 	Trace(); 
@@ -1018,11 +1016,13 @@ int sanitise_json(char *directory)
 
     return 0;
 }
+*/
 
 int api_add(char *username, char *password, char *webaddr, char *title)
 {
   char		*url;
-  char *escaped;
+  char *escaped_url;
+  char *escaped_title;
   int retval = -1;
 	Trace(); 
 
@@ -1034,21 +1034,20 @@ int api_add(char *username, char *password, char *webaddr, char *title)
 
   CURL		*curl;
 	curl = curl_easy_init();
-  escaped = curl_easy_escape(curl, webaddr, 0);
-  puts(escaped);
+  escaped_url = curl_easy_escape(curl, webaddr, 0);
+  escaped_title = curl_easy_escape(curl, title, 0);
+  puts(escaped_url);
   
 	asprintf(&url, 
       "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", 
-      escaped, title); 
+      escaped_url, escaped_title); 
 
-  Print("Using:\n"
-	      "%s as URL\n"
-		  "%s/%s as username/pass", url, username, password);
+  Print("Using:\n%s as URL\n", url);
 
   retval = curl_jam(url, username, password);
 
 	free(url);
-  curl_free(escaped);
+  curl_free(escaped_url);
   curl_easy_cleanup(curl); /* always cleanup */
   return retval;
 }
@@ -1071,12 +1070,12 @@ int api_download(char *verb, char *username, char *password, char *directory)
 
 	make_file(filepath);
 
-	Print("Using:\n"
-	      "%s as filepath\n"
-	      "%s as URL\n"
-		  "%s/%s as username/pass", filepath, url, username, password);
+	V("Using:\n"
+    "%s as filepath\n"
+    "%s as URL\n", filepath, url);
 
 	curl_grab(url, filepath, username, password);
+
 	free(url);
 	free(filepath);
 	return 0;
@@ -1277,10 +1276,10 @@ void check_env_variables()
   Dbg("getenv %s: %s", s_pass, getenv(s_pass));
 
   if (getenv(s_user) != NULL)
-    asprintf(&options.opt_username, "%s", getenv(s_user));
+    asprintf(&options.username, "%s", getenv(s_user));
 
   if (getenv(s_user) != NULL)
-    asprintf(&options.opt_password, "%s", getenv(s_pass));
+    asprintf(&options.password, "%s", getenv(s_pass));
 
   return;
 }
@@ -1312,7 +1311,7 @@ int main(int argc, char *argv[])
 	"-p turn off formatting e.g. for redirecting stdout to a file\n"
 	"UPDATE:\n"
 	"-a auto update: updates if the API says it has updated since last downloaded\n"
-	"-f force update: forces update, useful if error\n" /* TODO: check flow control */
+	"-f force update: forces update\n" /* TODO: check flow control */
   "OTHER:\n"
 	"-v toggle verbose\n" 
 	"-d turn debug mode on\n"
@@ -1320,10 +1319,10 @@ int main(int argc, char *argv[])
 	"\n"
 	"Example usage:\n"
 	"Download bookmarks file from pinboard.in\n"
-	"./main -f\n"
+	"./pb -f\n"
 	"OR\n"
 	"Output only\n"
-	"./main -o\n"
+	"./pb -o\n"
 	"\n"
 	"Further Example usage:\n"
 	"CHECK ME:\n" /* TODO: these need checking */
@@ -1338,62 +1337,68 @@ int main(int argc, char *argv[])
 	int		ret = 0;
 
 	
-	options.opt_remote = false; /* We are going to be downloading and therefore require username/pass */
-	options.opt_output = false;
-	options.opt_sanitise = false;
-	options.opt_check = false;
-	options.opt_autoupdate = false;
-	options.opt_username = NULL;
-	options.opt_password = NULL;
-	options.opt_force_update = false;
+	options.remote = false; /* We are going to be downloading and therefore require username/pass */
+	options.output = false;
+	options.autoupdate = false;
+	options.username = NULL;
+	options.password = NULL;
+	options.force_update = false;
+
+/*
+ * Default options
+ */
+
+  options.del = false;
+  options.add = false;
+  options.hashes = false;
+  options.no_colours = false;
+  options.no_tags = false;
+  options.tags_only = false;
+
 
 	/* Required for getopt */
 	extern char	*optarg;
 	extern int	optind, optopt;
 
-    se = stdout;
-    /* se = stderr; */
-    
+  se = stdout;
+  /* se = stderr; */
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":afcovdhswpu:t:z:r:")) != -1) {
+	while ((c = getopt(argc, argv, ":afcovdhwpu:t:z:r:")) != -1) {
 		switch (c) {
       case 'z':
-        options.opt_output = true;
-        asprintf(&options.opt_search_str, "%s", optarg);
+        options.output = true;
+        asprintf(&options.search_str, "%s", optarg);
         Dbg("Searching");
         break;
-      case 's':
-        options.opt_sanitise = true;
-        break;
       case 'a':
-        options.opt_autoupdate = true;
-        options.opt_remote = true;
+        options.autoupdate = true;
+        options.remote = true;
         Dbg("Autoupdate");
         break;
       case 'f':
-        options.opt_force_update = true;
-        options.opt_autoupdate = false;
-        options.opt_remote = true;
+        options.force_update = true;
+        options.autoupdate = false;
+        options.remote = true;
         Dbg("Forced update");
         break;
       case 'p':
-        opt_no_colours = true;
+        options.no_colours = true;
         Dbg("Printing with no colours");
         break;
       case 'c':
-        opt_tags_only = true;
+        options.tags_only = true;
         Dbg("Tags only");
         break;
       case 'w':
-        opt_no_tags = true;
+        options.no_tags = true;
         Dbg("No tags");
         break;
       case 'o':
-        options.opt_output = true;
-        options.opt_autoupdate = false;
-        Dbg("Output");
+        options.output = true;
+        options.autoupdate = false;
+        Dbg("Output toggled");
         break;
       case 'v':
         opt_verbose = !opt_verbose;
@@ -1410,16 +1415,18 @@ int main(int argc, char *argv[])
         errflg = true; // i.e. show help
         break;
       case 'r':
-        opt_del = true;
-        options.opt_output = true;
-        asprintf(&options.opt_search_str, "%s", optarg);
+        options.del = true;
+//        options.output = true;
+        asprintf(&options.search_str, "%s", optarg);
         Dbg("Deleting");
         break;
       case 't':
-        asprintf(&options.opt_add_title, "%s", optarg);
+        options.add = true;
+        asprintf(&options.add_title, "%s", optarg);
         break;
       case 'u':
-        asprintf(&options.opt_add_url, "%s", optarg);
+        options.add = true;
+        asprintf(&options.add_url, "%s", optarg);
         break;
       case ':':									   /* Option req argument without argument */
         fprintf(se, "Option -%c requires an operand\n", optopt);
@@ -1450,29 +1457,26 @@ int main(int argc, char *argv[])
 	
 	tzset(); /* Set timezone I do believe */
 
-  if (options.opt_username && options.opt_password) {
-		Print("Using:\n"
-		      "%s as username\n"
-		      "%s as password", options.opt_username, options.opt_password);
-	} else if (options.opt_remote && (!options.opt_username || !options.opt_password)) {
+  if (options.username && options.password) {
+		Dbg("Using: %s as username, %s as password", options.username, options.password);
+	} else if (options.remote && (!options.username || !options.password)) {
 		char b1[512];
-		if (!options.opt_username) { 
+		if (!options.username) { 
 			Zero_char(b1, sizeof(b1));
 			ask_string("Username: ", b1);
-			asprintf(&options.opt_username, "%s", b1);
+			asprintf(&options.username, "%s", b1);
 		}
-		if (!options.opt_password) {
+		if (!options.password) {
 			Zero_char(b1, sizeof(b1));
 			/* NOTE: getpass is depreciated */
-			options.opt_password = getpass("Password: ");
-			//asprintf(&opt_password, "%s", b1);
+			options.password = getpass("Password: ");
+			//asprintf(&password, "%s", b1);
 		}
 	}
 
   /* If these are both set we want to add and then quit */
-  if (strval(options.opt_add_url) && strval(options.opt_add_title)) {
-     api_add(options.opt_username, options.opt_password, options.opt_add_url, options.opt_add_title);
-      goto bye;
+  if (strval(options.add_url) && strval(options.add_title)) {
+     api_add(options.username, options.password, options.add_url, options.add_title);
   }
 
 	/*
@@ -1483,30 +1487,32 @@ int main(int argc, char *argv[])
 	/* Look in ~/.pinboard and check we can write to it */
 
 	asprintf(&filepath, "%s/%s", getenv("HOME"), ".pinboard");
-	V("Looking in %s", filepath);
+	Dbg("Looking in %s", filepath);
 	check_dir(filepath);
 
-	if (options.opt_force_update && options.opt_remote) {
-		force_update(filepath, options.opt_username, options.opt_password);
+	if (options.force_update && options.remote) {
+		force_update(filepath, options.username, options.password);
 	}
 
-	if (options.opt_autoupdate && options.opt_remote) {
-		auto_update(filepath, options.opt_username, options.opt_password);
+	if (options.autoupdate && options.remote) {
+		auto_update(filepath, options.username, options.password);
 	}
 
-	if (options.opt_output) {
+	if (options.output) {
 		output(filepath, "all");
 	}
 
-  if (options.opt_sanitise) {
+/*  if (options.sanitise) {
     puts("Sanitize!\n");
     sanitise_json(filepath);
-  }
+  } */
 
-bye:
+  if (options.del || options.force_update || options.add)
+    V("Done");
+
 	Sfree(filepath);
-	Sfree(options.opt_username);
-	Sfree(options.opt_password);
+	Sfree(options.username);
+	Sfree(options.password);
 
 	return ret;
 }
