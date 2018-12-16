@@ -9,7 +9,7 @@ Note: requires cmake and glib2. It also uses the yajl library.
 
 For yajl see <https://github.com/lloyd/yajl>
 
-With `brew` the following with suffice on OS X/macos (tested on fresh OS X 10.12.3)
+With `brew` the following will suffice on OS X/MacOS. It should also work on linux etc -- substitute `brew` for your system's package manager.
 
 Pre-requisites:
 
