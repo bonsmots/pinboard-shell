@@ -1,7 +1,9 @@
+.gitignore
 yajl/
 main
 main.dSYM/
 .DS_Store
 getenv
+getenv.c
 pb
 pb.dSYM/
