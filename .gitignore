@@ -1,4 +1,5 @@
 .gitignore
+*.swp
 yajl/
 main
 main.dSYM/
