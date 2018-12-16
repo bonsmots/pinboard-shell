@@ -2,9 +2,9 @@
  * Helper functions
  */
 
-void swpch(char find[3], char replace[3], unsigned char *string, int string_length)
+void swpch(char find[3], char replace[3], char *string, int string_length)
 {
-	unsigned char *p = string;
+	char *p = string;
 	for (int i = 0; i < string_length; i++)
 	{
 		if (*p == find[0] && *(p+1) == find[1])
@@ -14,6 +14,19 @@ void swpch(char find[3], char replace[3], unsigned char *string, int string_leng
 		}
 		p++;
 	}
+}
+
+void chch(char from, char to, char *string, int len)
+{
+  char *p = string;
+	for (int i = 0; i < len; i++) 
+  {
+    if (*p == from)
+      {
+          *p = to;
+      }
+      p++;
+  }
 }
 
 // TODO: obviously not secure

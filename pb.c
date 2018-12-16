@@ -1,5 +1,3 @@
-/* Next: ipliment delete, update readme with screenshots */
-
 /*
  * pb a.k.a. pinboard-shell
  *
@@ -73,9 +71,7 @@
  */
 
 /*
- * BUGS: Descriptions or other fields containing " within them will break the parser.
- * TODO: search for ^ and replace with something else before parsing, then replace back
- * TODO: Incorrect user/pass not handled - should check for 401 response
+ * BUG/TODO: Incorrect user/pass not handled - should check for 401 response
  */
 
 /*
@@ -119,6 +115,7 @@
  */
 
 bool opt_debug;
+bool opt_super_debug;
 bool opt_verbose;
 bool opt_trace;
 
@@ -569,18 +566,113 @@ int pretty_json_output(char *filedir, char *verb)
 	return retval;
 }
 
-void del_me(char *url)
+// API bits
+
+int api_del(char *username, char *password, char *webaddr)
 {
-  printf("Delete!\n");
+  char *url;
+  char *escaped_url;
+  int retval = -1;
+
+	Trace(); 
+
+  if (!strval(username) 
+      || !strval(password)
+      || !strval(webaddr))
+    return -1;
+
+  CURL		*curl;
+	curl = curl_easy_init();
+  escaped_url = curl_easy_escape(curl, webaddr, 0);
+  
+	asprintf(&url, 
+      "https://api.pinboard.in/v1/posts/delete?url=%s&format=json", 
+      escaped_url); 
+
+  V("Using:\n%s as URL\n", url);
+
+  retval = curl_jam(url, username, password);
+
+	free(url);
+  curl_free(escaped_url);
+  curl_easy_cleanup(curl); /* always cleanup */
+  return retval;
+}
+
+int api_add(char *username, char *password, char *webaddr, char *title)
+{
+  char		*url;
+  char *escaped_url;
+  char *escaped_title;
+  int retval = -1;
+	Trace(); 
+
+  if (!strval(username) 
+      || !strval(password)
+      || !strval(webaddr)
+      || !strval(title))
+		return -1;
+
+  CURL		*curl;
+	curl = curl_easy_init();
+  escaped_url = curl_easy_escape(curl, webaddr, 0);
+  escaped_title = curl_easy_escape(curl, title, 0);
+  puts(escaped_url);
+  
+	asprintf(&url, 
+      "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", 
+      escaped_url, escaped_title); 
+
+  V("Using:\n%s as URL\n", url);
+
+  retval = curl_jam(url, username, password);
+
+	free(url);
+  curl_free(escaped_url);
+  curl_free(escaped_title);
+  curl_easy_cleanup(curl); /* always cleanup */
+  return retval;
+}
+
+// Wrapper for downloading with the API
+int api_download(char *verb, char *username, char *password, char *directory)
+{
+	char		*url;
+	char		*filepath;
+
+	Trace(); 
+
+	asprintf(&url, "https://api.pinboard.in/v1/posts/%s&format=json", verb);
+	asprintf(&filepath, "%s/%s.json", directory, verb);
+
+	/* TODO: check update time */
+
+	if (!remove(filepath))
+		Print("Deleted %s", filepath);
+
+	make_file(filepath);
+
+	V("Using:\n"
+    "%s as filepath\n"
+    "%s as URL\n", filepath, url);
+
+	curl_grab(url, filepath, username, password);
+
+	free(url);
+	free(filepath);
+	return 0;
 }
 
 void del_prompt(char *url)
 {
   char b1[512];
   puts(url);
-  ask_string("Do you want to delete this URL (y/n?) ", b1);
+  ask_string("Do you want to delete this URL (y/n/q?) ", b1);
   puts("");
-  if (strcasestr(b1,"y")) del_me(url);
+  if (strcasestr(b1,"q"))
+    exit(0);
+  if (strcasestr(b1,"y"))
+    api_del(options.username, options.password, url);
 }
 
 int parse_handoff(unsigned char *buf, size_t len)
@@ -598,6 +690,9 @@ int parse_handoff(unsigned char *buf, size_t len)
 	char			*out = out_buffer;
 	char			*spare = out_buffer;
 	char			sep = 94; // ^ character
+  unsigned char      *loc2;
+  unsigned char      *loc3;
+  unsigned char      *loc4;
 
 	Trace(); 
 
@@ -609,11 +704,14 @@ int parse_handoff(unsigned char *buf, size_t len)
 		spare++;
 	}
 
-	spare = out;
-	loc = buf;
+  spare = out;
+	loc = loc2 = loc3 = buf;
 
-  /* Even though this seems sensible it seems to reduce the output and so somehow messes up the count */
-  //swpch("\\\"", "\'\'", buf, len);
+  /* Replace separator signifier with something else to avoid confusing the seperator logic later on */
+  chch(sep, '-', (char *)loc2, len);
+
+  /* Replace \" within any of the fields with ' as the former breaks the parser */
+  swpch("\\\"", "\'\'", (char *)loc3, len);
 
 	/*
 	 * The below removes everyting except tag and value, adding sep
@@ -648,7 +746,8 @@ int parse_handoff(unsigned char *buf, size_t len)
 		/* Move along by incrementing pointer */
 		loc++;
 	}
-	/* out_buffer now contains all our buffer to tokenise */
+
+  if (opt_super_debug) puts((char *)loc4);
 
 	char		*cp = NULL;
 	char		*dp = NULL;
@@ -686,6 +785,11 @@ int parse_handoff(unsigned char *buf, size_t len)
 	}
 
 	Dbg("Tokenising complete on %i strings", count);
+
+  if (opt_super_debug)
+    for (int j = 0; j < count; j++)
+      printf("%s %s\n", pairs[j].tag, pairs[j].value);
+
 	for (int j = 0; j < count; j++) {
 		/* If any of the tag strings are the strings we are interested in */
 		if (strstr(pairs[j].tag, "href") 
@@ -740,7 +844,7 @@ int parse_handoff(unsigned char *buf, size_t len)
             printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
           }
           if (options.del)
-            del_prompt(bm[j].desc);
+            del_prompt(bm[j].href);
         }
       }
       else
@@ -786,7 +890,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 int output(char *filedir, char *verb)
 {
 	yajl_handle		hand;
-	static unsigned char fileData[65536];
+	static unsigned char fileData[65536 * 5]; /* TODO: find out how large the file is and make buffer the right size accordingly */
 	int				retval = 0;
 	/* generator config */
 	yajl_gen		g;
@@ -816,7 +920,6 @@ int output(char *filedir, char *verb)
 	hand = yajl_alloc(&callbacks, NULL, (void *)g);
 	/* and let's allow comments by default */
 	yajl_config(hand, yajl_allow_comments, 1);
-
 
 	for (;;) {
 		rd = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
@@ -1017,69 +1120,6 @@ int sanitise_json(char *directory)
     return 0;
 }
 */
-
-int api_add(char *username, char *password, char *webaddr, char *title)
-{
-  char		*url;
-  char *escaped_url;
-  char *escaped_title;
-  int retval = -1;
-	Trace(); 
-
-  if (!strval(username) 
-      || !strval(password)
-      || !strval(webaddr)
-      || !strval(title))
-		return -1;
-
-  CURL		*curl;
-	curl = curl_easy_init();
-  escaped_url = curl_easy_escape(curl, webaddr, 0);
-  escaped_title = curl_easy_escape(curl, title, 0);
-  puts(escaped_url);
-  
-	asprintf(&url, 
-      "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", 
-      escaped_url, escaped_title); 
-
-  Print("Using:\n%s as URL\n", url);
-
-  retval = curl_jam(url, username, password);
-
-	free(url);
-  curl_free(escaped_url);
-  curl_easy_cleanup(curl); /* always cleanup */
-  return retval;
-}
-
-// Wrapper for downloading with the API
-int api_download(char *verb, char *username, char *password, char *directory)
-{
-	char		*url;
-	char		*filepath;
-
-	Trace(); 
-
-	asprintf(&url, "https://api.pinboard.in/v1/posts/%s&format=json", verb);
-	asprintf(&filepath, "%s/%s.json", directory, verb);
-
-	/* TODO: check update time */
-
-	if (!remove(filepath))
-		Print("Deleted %s", filepath);
-
-	make_file(filepath);
-
-	V("Using:\n"
-    "%s as filepath\n"
-    "%s as URL\n", filepath, url);
-
-	curl_grab(url, filepath, username, password);
-
-	free(url);
-	free(filepath);
-	return 0;
-}
 
 time_t get_file_last_mod_time(char *filepath)
 {
@@ -1365,7 +1405,7 @@ int main(int argc, char *argv[])
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
 	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":afcovdhwpu:t:z:r:")) != -1) {
+	while ((c = getopt(argc, argv, ":afcovdhwspu:t:z:r:")) != -1) {
 		switch (c) {
       case 'z':
         options.output = true;
@@ -1400,6 +1440,10 @@ int main(int argc, char *argv[])
         options.autoupdate = false;
         Dbg("Output toggled");
         break;
+      case 's':
+        opt_super_debug = true;
+        Dbg("Superdebug toggled");
+        break;
       case 'v':
         opt_verbose = !opt_verbose;
         Dbg("Verbose toggled");
@@ -1416,7 +1460,7 @@ int main(int argc, char *argv[])
         break;
       case 'r':
         options.del = true;
-//        options.output = true;
+        options.output = true; // required to run through the loop
         asprintf(&options.search_str, "%s", optarg);
         Dbg("Deleting");
         break;
