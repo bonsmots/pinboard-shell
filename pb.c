@@ -72,6 +72,7 @@
 
 /*
  * BUG/TODO: Incorrect user/pass not handled - should check for 401 response
+ * BUG/TODO: Presupposes 'solarized' colour scheme on the terminal, which probably is not everyone
  */
 
 /*
