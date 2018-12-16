@@ -1341,7 +1341,7 @@ int main(int argc, char *argv[])
 	"ADD:\n"
   "-t Title -u \"https://url.com/\" \n"
 	"DELETE:\n"
-  "-r \"string\" < Yet to be implimented\n"
+  "-r \"string\" \n"
   "SEARCH:\n"
   "-z \"string\"\n"
 	"LIST:\n"
@@ -1364,10 +1364,9 @@ int main(int argc, char *argv[])
 	"Output only\n"
 	"./pb -o\n"
 	"\n"
-	"Further Example usage:\n"
-	"CHECK ME:\n" /* TODO: these need checking */
-	"List most frequent tags: pb -ocp | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
-	"List those tagged with $TAG for export to a file: pb -op | grep --color=never -B2 $TAG > $TAG.tagged\n"
+	"Further example usage:\n"
+	"List most frequent tags:\n./pb -ocp | sort | awk '{ print $NF }' | uniq -c | sort -nr | less\n"
+	"List those tagged with $TAG for export to a file:\n./pb -op | grep --color=never -B2 $TAG > $TAG.tagged\n"
 	"\n";
 
 	error_mode = 's'; /* Makes Stopif use abort() */
