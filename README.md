@@ -1,6 +1,8 @@
 pinboard-shell
 ==============
 
+pb is a shell client for the excellent <https://pinboard.in/> bookmarking service
+
 Looks like:
 
 ![Screenshot](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screenshot2.png)
