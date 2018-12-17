@@ -5,7 +5,7 @@ pb is a shell client for the excellent <https://pinboard.in/> bookmarking servic
 
 Looks like:
 
-![Screenshot](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screenshot2.png)
+![Screenshot](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screenshot3.png)
 
 Note: requires cmake and glib2. It also uses the yajl library. 
 
