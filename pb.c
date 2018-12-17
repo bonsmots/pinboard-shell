@@ -1287,7 +1287,7 @@ void force_update(char *filepath, char *username, char *password)
 	Zero_char(buffer, sizeof(buffer));
 	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
 	if (remove(buffer)) {
-		V("Failed to delete %s", buffer);
+		// V("Failed to delete %s", buffer);
 	} else {
 		V("%s deleted", buffer);
 		api_download("update", username, password, filepath);
