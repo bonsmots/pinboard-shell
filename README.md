@@ -5,8 +5,11 @@ pb is a shell client for the excellent <https://pinboard.in/> bookmarking servic
 
 Looks like:
 
+**List**
 ![Output](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screenshot3.png)
+**Search**
 ![Search](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-search.png)
+**Delete**
 ![Delete](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-remove.png)
 
 Note: requires cmake and glib2. It also uses the yajl library. 
@@ -45,7 +48,7 @@ ADD:
 DELETE:
 -r "string"
 SEARCH:
--z "string"
+-s "string"
 LIST:
 -o flag to list data
 -w do not output tags
