@@ -1344,7 +1344,7 @@ int main(int argc, char *argv[])
 	"DELETE:\n"
   "-r \"string\" \n"
   "SEARCH:\n"
-  "-z \"string\"\n"
+  "-s \"string\"\n"
 	"LIST:\n"
 	"-o flag to list data\n"
 	"-w do not output tags\n"
@@ -1404,11 +1404,11 @@ int main(int argc, char *argv[])
   /* se = stderr; */
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
-	// -o -v -d -h -u -p
-	while ((c = getopt(argc, argv, ":afcovdhwspu:t:z:r:")) != -1) {
+	while ((c = getopt(argc, argv, ":afcovdhwzpu:t:s:r:")) != -1) {
 		switch (c) {
-      case 'z':
+      case 's':
         options.output = true;
+        opt_verbose = false; // Required to work properly
         asprintf(&options.search_str, "%s", optarg);
         Dbg("Searching");
         break;
@@ -1440,7 +1440,7 @@ int main(int argc, char *argv[])
         options.autoupdate = false;
         Dbg("Output toggled");
         break;
-      case 's':
+      case 'z':
         opt_super_debug = true;
         Dbg("Superdebug toggled");
         break;
