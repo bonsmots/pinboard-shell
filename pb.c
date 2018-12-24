@@ -1196,14 +1196,15 @@ bool is_file_more_recent(char *file, struct tm dt_tm)
 	return (delta > 0);
 }
 
-// 
+// Auto update all.json if update.json (which is cached for 5 mins) suggests 
+// this is needed
 int auto_update(char *filepath, char *username, char *password)
 {
 	char		*d;
 	char		b1[1024] = {0};
 	char	 	buffer[512];
-	double		time_since_update;
-    int         d_len;
+	double	time_since_update;
+  int     d_len;
 
 	time_t		api_update_time;
 	struct tm	api_update_time_tm;
@@ -1223,6 +1224,7 @@ int auto_update(char *filepath, char *username, char *password)
 	Zero_char(buffer, sizeof(buffer));
 	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
 
+	/* If it doesn't exist, download it */
 	if (!does_file_exist(buffer)) {
 		V("Downloading")
 		api_download("update", username, password, filepath);
@@ -1231,12 +1233,12 @@ int auto_update(char *filepath, char *username, char *password)
 	time_since_update = time_since_last_mod(buffer);
 
 	/* D/l if stale */
-	if (time_since_update >= (30 * 60)) /* If greater than 30 mins have elapsed */
+	if (time_since_update >= (5 * 60)) /* If greater than 5 mins have elapsed */
 	{
-		V("Looks stale, let's update");
+		V("Update info is >5 mins old, updating");
 		api_download("update", username, password, filepath);
 	} else {
-		V("Recent enough, not updating");
+		V("Update info is <5 mins old, not updating");
 	}
 
 	/* See when update.json says we last updated */
@@ -1249,18 +1251,18 @@ int auto_update(char *filepath, char *username, char *password)
 
 	Zero_char(buffer, sizeof(buffer));
 	strftime(buffer, sizeof(buffer), "%A %F %T %Z", &api_update_time_tm);
-	V("API tells us we last updated on %s (Note this is cached)", buffer);
+	V("API tells us we last updated on %s (note this is cached so info could be up to 5 mins old)", buffer);
 
 	/* Check when all.json last updated */
 	Zero_char(buffer, sizeof(buffer));
 	snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "all.json");
 	if (is_file_more_recent(buffer, api_update_time_tm))
 	{
-		V("Data is more recent than last update according to API");
+		V("We are up to date according to API");
 	}
 	else
 	{
-		V("Data is older than last update according to API, let's update");
+		V("We are not up to date according to API, updating");
 		api_download("all", username, password, filepath);
 		/* We also delete update.json to force this to be updated next time run */
 		Zero_char(buffer, sizeof(buffer));
@@ -1272,7 +1274,6 @@ int auto_update(char *filepath, char *username, char *password)
 		}
 	}
 
-	//output(filepath, "all");
 	return 0;
 }
 
@@ -1281,7 +1282,7 @@ void force_update(char *filepath, char *username, char *password)
 	char	 	buffer[512];
 	Trace();
 
-	V("Deleting update and all posts cache and re-downloading");
+	V("Deleting cached info and re-downloading");
 
 	/* Delete update.json and re-download */
 	Zero_char(buffer, sizeof(buffer));
@@ -1376,7 +1377,6 @@ int main(int argc, char *argv[])
 	int		exitflg = 0;
 	int		ret = 0;
 
-	
 	options.remote = false; /* We are going to be downloading and therefore require username/pass */
 	options.output = false;
 	options.autoupdate = false;
@@ -1501,8 +1501,10 @@ int main(int argc, char *argv[])
 	
 	tzset(); /* Set timezone I do believe */
 
+  /* Username and password are set */
   if (options.username && options.password) {
 		Dbg("Using: %s as username, %s as password", options.username, options.password);
+    /* Ask for them if not set and we are needing to connect */
 	} else if (options.remote && (!options.username || !options.password)) {
 		char b1[512];
 		if (!options.username) { 
@@ -1531,7 +1533,7 @@ int main(int argc, char *argv[])
 	/* Look in ~/.pinboard and check we can write to it */
 
 	asprintf(&filepath, "%s/%s", getenv("HOME"), ".pinboard");
-	Dbg("Looking in %s", filepath);
+	// Dbg("Looking in %s", filepath);
 	check_dir(filepath);
 
 	if (options.force_update && options.remote) {

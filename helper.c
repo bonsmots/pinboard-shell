@@ -29,7 +29,8 @@ void chch(char from, char to, char *string, int len)
   }
 }
 
-// TODO: obviously not secure
+// TODO: obviously not secure -- needs redoing in a secure way
+// i.e. with the buffer length set
 char* ask_string(char *message, char *input)
 {
 	printf("%s", message);
