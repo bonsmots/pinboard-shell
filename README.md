@@ -5,12 +5,14 @@ pb is a shell client for the excellent <https://pinboard.in/> bookmarking servic
 
 Looks like:
 
-**List**
-![Output](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screenshot3.png)
-**Search**
-![Search](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-search.png)
+**Add**
+![Delete](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-add.png)
 **Delete**
 ![Delete](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-remove.png)
+**Search**
+![Search](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-search.png)
+**List**
+![Output](https://raw.githubusercontent.com/bonsmots/pinboard-shell/master/screen-list.png)
 
 Note: requires cmake and glib2. It also uses the yajl library. 
 

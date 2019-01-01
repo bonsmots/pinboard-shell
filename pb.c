@@ -618,7 +618,6 @@ int api_add(char *username, char *password, char *webaddr, char *title)
 	curl = curl_easy_init();
   escaped_url = curl_easy_escape(curl, webaddr, 0);
   escaped_title = curl_easy_escape(curl, title, 0);
-  puts(escaped_url);
   
 	asprintf(&url, 
       "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", 
