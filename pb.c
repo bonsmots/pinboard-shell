@@ -648,7 +648,7 @@ int api_download(char *verb, char *username, char *password, char *directory)
 	/* TODO: check update time */
 
 	if (!remove(filepath))
-		Print("Deleted %s", filepath);
+		V("Deleted %s", filepath);
 
 	make_file(filepath);
 
