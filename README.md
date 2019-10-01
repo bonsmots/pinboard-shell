@@ -37,6 +37,8 @@ Build:
 
 Use:
 
+Authentication is done using `PB_USER` and `PB_PASS` environment variables -- clearly don't use this on a shared machine or where these are made visible
+
 ````  
 ./pb -h
 
