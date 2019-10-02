@@ -89,7 +89,12 @@
 #include <fcntl.h> // open
 #include <unistd.h> // close, getopt, getpass
 #include <string.h> // strstr, strdup, strtok
+
 #include <time.h> // time types
+extern char *tzname[];
+extern long int timezone;
+extern int daylight;
+
 #include <curl/curl.h> // curl
 #include <sys/stat.h> // fstat
 #include <sys/types.h> // time_t etc
@@ -121,10 +126,10 @@ bool opt_verbose;
 bool opt_trace;
 
 struct {
-		bool	remote;
-		bool	output;
-		bool	autoupdate;
-		bool	force_update;
+	bool	remote;
+	bool	output;
+	bool	autoupdate;
+	bool	force_update;
     bool 	del;
     bool 	add;
     bool 	hashes;
@@ -132,11 +137,11 @@ struct {
     bool	no_tags;
     bool	tags_only;
 
-		char	*username;
-		char	*password;
-		char	*add_url;
-		char	*add_title;
-		char	*search_str;
+	char	*username;
+	char	*password;
+	char	*add_url;
+	char	*add_title;
+	char	*search_str;
 } options;
 
 /*
@@ -144,6 +149,8 @@ struct {
  */
 
 // This is the colour pallete that we use -- the first value is the colour reset
+// TODO: maybe add choice of colour palletes
+
 char *clr[] =
 {
 	"\e[0m", //This is the reset code
@@ -257,13 +264,14 @@ int check_dir(char *dirpath)
 	if (status == -1) {
 		Dbg("Failed to open folder %s, likley it doesn't exist.", dirpath);
 		Dbg("Making folder %s", dirpath);
+
 		// TODO: should change this to tighter permissions
 		status = mkdir(dirpath, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
 		/*
 		 * S_IRWXU read, write, execute/search by owner 
-     * S_IRWXG read, * write, execute/search by group 
-     * S_IROTH read permission, others 
-     * S_IXOTH execute/search permission, others
+		 * S_IRWXG read, * write, execute/search by group 
+		 * S_IROTH read permission, others 
+		 * S_IXOTH execute/search permission, others
 		 */
 		Stopif(status != 0, return -1, "Make folder %s failed.", dirpath);
 	}
@@ -317,6 +325,7 @@ int make_file(char *filepath)
 	if (status == -1) {
 		Dbg("Failed to open file %s, likley it doesn't exist or is not readable.", filepath);
 		Dbg("Making file %s", filepath);
+
 		// TODO: should change this to tighter permissions
 		fildes = open(filepath, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
@@ -349,8 +358,8 @@ int make_file(char *filepath)
 // UNUSED
 int test_colours()
 {
-	int		colour_count = 15;
-	char	*colours[] =
+	int	colour_count = 15;
+	char *colours[] =
 	{
 		"\e[0;30m",
 		"\e[0;34m", //+
@@ -370,7 +379,7 @@ int test_colours()
 		"\e[1;37m" // +
 	};
 
-	char           *colour_labels[] =
+	char *colour_labels[] =
 	{
 		"Black            ",
 		"Blue             ",
@@ -400,7 +409,9 @@ int test_colours()
 
 /* From example at http://curl.haxx.se/libcurl/c/simple.html */
 /* TODO: add check for 401 response */
+
 // Pulls file at URL using CURL, writes to filepath
+
 int curl_grab(char *url, char *filepath, char *username, char *password)
 {
 	CURL		*curl;
@@ -456,7 +467,8 @@ int curl_jam(char *url, char *username, char *password)
 		curl_easy_setopt(curl, CURLOPT_URL, url);
 		curl_easy_setopt(curl, CURLOPT_USERNAME, username);
 		curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
-		//curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect
+		//curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect not used
+
 		res = curl_easy_perform(curl); /* Perform the request, res will get the return code */
 
 		if (res != CURLE_OK)								   /* Check for errors */
@@ -583,7 +595,7 @@ int api_del(char *username, char *password, char *webaddr)
     return -1;
 
   CURL		*curl;
-	curl = curl_easy_init();
+  curl = curl_easy_init();
   escaped_url = curl_easy_escape(curl, webaddr, 0);
   
 	asprintf(&url, 
@@ -594,7 +606,7 @@ int api_del(char *username, char *password, char *webaddr)
 
   retval = curl_jam(url, username, password);
 
-	free(url);
+  free(url);
   curl_free(escaped_url);
   curl_easy_cleanup(curl); /* always cleanup */
   return retval;
@@ -780,8 +792,7 @@ int parse_handoff(unsigned char *buf, size_t len)
 		}
 
 		tag = !tag;	/* Toggle tag and value */
-		cp = strtok(NULL, tokens) /* Breaks string into tokens -- subsequent tokens */
-;
+		cp = strtok(NULL, tokens); /* Breaks string into tokens -- subsequent tokens */
 	}
 
 	Dbg("Tokenising complete on %i strings", count);
@@ -890,8 +901,11 @@ int parse_handoff(unsigned char *buf, size_t len)
 int output(char *filedir, char *verb)
 {
 	yajl_handle		hand;
-	static unsigned char fileData[65536 * 5]; /* TODO: find out how large the file is and make buffer the right size accordingly */
-	int				retval = 0;
+	/* TODO: find out how large the file is and make buffer the right size accordingly */
+
+	static unsigned char fileData[65536 * 5]; 	
+	int retval = 0;
+
 	/* generator config */
 	yajl_gen		g;
 	yajl_status		stat;
@@ -1002,7 +1016,6 @@ char * file_to_mem(char *directory, char *verb, int *size)
 	while (bytes_read > 0)
 		bytes_read = read(fildes, data, buffer.st_size);
 
-
 	close(fildes);
 	free(filepath);
 
@@ -1021,6 +1034,7 @@ char * file_to_mem(char *directory, char *verb, int *size)
  * date_to is where to copy the field
  * max is sizeof data_from
  */
+
 void simple_parse_field(int field, char delim, char *data_from, char *data_to, int max)
 {
 	char		*loc, *out;
@@ -1142,6 +1156,7 @@ time_t get_file_last_mod_time(char *filepath)
 }
 
 /* Get age of file -- returns 'age' (i.e. time since last modified) of file in seconds as a double */
+// TODO: API uses GMT, localtime seems to be given in BST, so a delta will be shown even if there is none
 double time_since_last_mod(char *file)
 {
 	struct tm	file_tm;
@@ -1189,6 +1204,7 @@ bool is_file_more_recent(char *file, struct tm dt_tm)
 	strftime(buffer, sizeof(buffer), "%A %F %T %Z", &file_tm);
 	V("Update time %s", buffer);
 
+	// TODO: this seems not to work properly
 	delta = difftime(mktime(&file_tm), mktime(&dt_tm));
 	V("Delta in seconds %.0f, minutes %.2f, hours %.2f", delta, delta / 60.0, delta / 60.0 / 60.0);
 
@@ -1311,16 +1327,22 @@ void check_env_variables()
   char * s_user = "PB_USER";
   char * s_pass = "PB_PASS";
 
+  char * s_user_env;
+  char * s_pass_env;
+
+  s_user_env = getenv(s_user);
+  s_pass_env = getenv(s_pass);
+
   Trace();
 
-  Dbg("getenv %s: %s", s_user, getenv(s_user));
-  Dbg("getenv %s: %s", s_pass, getenv(s_pass));
+  Dbg("getenv %s: %s", s_user, s_user_env);
+  Dbg("getenv %s: %s", s_pass, s_pass_env);
 
-  if (getenv(s_user) != NULL)
-    asprintf(&options.username, "%s", getenv(s_user));
+  if (s_user_env != NULL)
+    asprintf(&options.username, "%s", s_user_env);
 
-  if (getenv(s_user) != NULL)
-    asprintf(&options.password, "%s", getenv(s_pass));
+  if (s_pass_env != NULL)
+    asprintf(&options.password, "%s", s_pass_env);
 
   return;
 }
@@ -1376,37 +1398,37 @@ int main(int argc, char *argv[])
 	int		exitflg = 0;
 	int		ret = 0;
 
-	options.remote = false; /* We are going to be downloading and therefore require username/pass */
+	options.remote = false; /* default is we assume do not need to make request/have username/pass */
 	options.output = false;
 	options.autoupdate = false;
 	options.username = NULL;
 	options.password = NULL;
 	options.force_update = false;
 
-/*
- * Default options
- */
+	/*
+	* Default options
+	*/
 
-  options.del = false;
-  options.add = false;
-  options.hashes = false;
-  options.no_colours = false;
-  options.no_tags = false;
-  options.tags_only = false;
-
+	options.del = false;
+	options.add = false;
+	options.hashes = false;
+	options.no_colours = false;
+	options.no_tags = false;
+	options.tags_only = false;
 
 	/* Required for getopt */
 	extern char	*optarg;
 	extern int	optind, optopt;
 
-  se = stdout;
-  /* se = stderr; */
+	se = stdout;
+	/* se = stderr; */
 
 	/* getopt loop per example at http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
-	while ((c = getopt(argc, argv, ":afcovdhwzpu:t:s:r:")) != -1) {
+	while ((c = getopt(argc, argv, ":zafcovdhwzpu:t:s:r:")) != -1) {
 		switch (c) {
       case 's':
         options.output = true;
+		options.remote = false; // EDITED
         opt_verbose = false; // Required to work properly
         asprintf(&options.search_str, "%s", optarg);
         Dbg("Searching");
@@ -1440,8 +1462,9 @@ int main(int argc, char *argv[])
         Dbg("Output toggled");
         break;
       case 'z':
-        opt_super_debug = true;
-        Dbg("Superdebug toggled");
+        options.remote = true;
+        //opt_super_debug = true;
+        //Dbg("Superdebug toggled");
         break;
       case 'v':
         opt_verbose = !opt_verbose;
@@ -1458,16 +1481,19 @@ int main(int argc, char *argv[])
         errflg = true; // i.e. show help
         break;
       case 'r':
+        options.remote = true;
         options.del = true;
         options.output = true; // required to run through the loop
         asprintf(&options.search_str, "%s", optarg);
         Dbg("Deleting");
         break;
       case 't':
+	  	options.remote = true;
         options.add = true;
         asprintf(&options.add_title, "%s", optarg);
         break;
       case 'u':
+	  	options.remote = true;
         options.add = true;
         asprintf(&options.add_url, "%s", optarg);
         break;
@@ -1481,13 +1507,14 @@ int main(int argc, char *argv[])
 		}
 	}
 
-  /* Tell user what is going on */ 
+	/* Print warning message */ 
 	puts(msg_warn);
-  if (opt_verbose) V("Verbose mode on");
-  if (opt_trace) V("Tracing mode on");
-  if (opt_debug) V("Debugging mode on");
 
-  check_env_variables(); /* Checks env variables for user/pass combo */
+	if (opt_verbose) V("Verbose mode on");
+	if (opt_trace) V("Tracing mode on");
+	if (opt_debug) V("Debugging mode on");
+
+	check_env_variables(); /* Checks env variables for user/pass combo */
 
 	/* Some issue -- print usage message */
 	if (errflg) {
@@ -1499,9 +1526,10 @@ int main(int argc, char *argv[])
 	if (exitflg) return exitflg;
 	
 	tzset(); /* Set timezone I do believe */
+	Dbg("tzname: %s,%s timezone: %li daylight: %i", tzname[0], tzname[1], timezone, daylight);
 
-  /* Username and password are set */
-  if (options.username && options.password) {
+	/* Username and password are set */
+	if (options.username && options.password) {
 		Dbg("Using: %s as username, %s as password", options.username, options.password);
     /* Ask for them if not set and we are needing to connect */
 	} else if (options.remote && (!options.username || !options.password)) {
