@@ -6,7 +6,7 @@ pb is a shell client for the excellent [pinboard.in](https://pinboard.in/) bookm
 Features:
 
 - Fast
-- Uses SHTTP to may API calls to [pinboard.in](https://pinboard.in/) as you would expect
+- Uses HTTPS to make API calls to [pinboard.in](https://pinboard.in/) as you would expect
 
 Caveats:
 
