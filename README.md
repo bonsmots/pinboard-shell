@@ -37,8 +37,20 @@ Note: if you are inside an anaconda environment run `conda deactivate` first or 
 
 Pre-requisites:
 
+	###
+	# MacOS
+	###
+
 	brew install glib
 	brew cask install cmake
+
+	###
+	# Debian/Ubuntu
+	# note that could use one of the other libcurl-dev packages instead
+	# see e.g. https://askubuntu.com/questions/78183/installing-curl-h-library
+	###
+
+	sudo apt install cmake libcurl4-openssl-dev
 
 Build:
 
