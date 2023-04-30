@@ -29,6 +29,7 @@ Requires:
 
 - cmake (broadly used and easily installed; see below)
 - glib2 (ditto)
+  - `sudo apt-get install libglib2.0` on ubuntu
 - [yajl](https://github.com/lloyd/yajl) (more detail below)
 
 The below steps take care of these on `OSX`/`MacOS`
