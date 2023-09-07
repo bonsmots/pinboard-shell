@@ -988,7 +988,6 @@ int output(char *filedir, char *verb) {
 char *file_to_mem(char *directory, char *verb, int *size) {
   char *filepath;
   char *data;
-  int status;
   int fildes;
   int bytes_read = 1;
   struct stat buffer;
@@ -1003,14 +1002,14 @@ char *file_to_mem(char *directory, char *verb, int *size) {
     Ftl("Cannot open %s", filepath);
   }
 
-  status = fstat(fildes, &buffer);
+  fstat(fildes, &buffer);
   close(fildes);
 
   *size = buffer.st_size;
-  V("%ld bytes size, %d bytes", buffer.st_size, *size);
+  V("%lld bytes size, %d bytes", buffer.st_size, *size);
   if (buffer.st_size > 1000000) {
     // If more than a meg something is going wrong, bail
-    Ftl("File is %ld big which doesn't make sense, bailing", buffer.st_size);
+    Ftl("File is %lld big which doesn't make sense, bailing", buffer.st_size);
   } else {
     data = malloc(buffer.st_size + 1);
   }
@@ -1141,7 +1140,6 @@ int sanitise_json(char *directory)
 */
 
 time_t get_file_last_mod_time(char *filepath) {
-  int status;
   int fildes;
   struct stat buffer;
 
@@ -1152,9 +1150,8 @@ time_t get_file_last_mod_time(char *filepath) {
   if (fildes < 0) {
     Ftl("Cannot open %s", filepath);
   }
-  //  Dbg("Cannot open %s", filepath);
 
-  status = fstat(fildes, &buffer);
+  fstat(fildes, &buffer);
   close(fildes);
 
   return buffer.st_mtime;
