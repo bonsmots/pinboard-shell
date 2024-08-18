@@ -1006,10 +1006,10 @@ char *file_to_mem(char *directory, char *verb, int *size) {
   close(fildes);
 
   *size = buffer.st_size;
-  V("%ld bytes size, %d bytes", buffer.st_size, *size);
+  V("%lld bytes size, %d bytes", buffer.st_size, *size);
   if (buffer.st_size > 1000000) {
     // If more than a meg something is going wrong, bail
-    Ftl("File is %ld big which doesn't make sense, bailing", buffer.st_size);
+    Ftl("File is %lld big which doesn't make sense, bailing", buffer.st_size);
   } else {
     data = malloc(buffer.st_size + 1);
   }
