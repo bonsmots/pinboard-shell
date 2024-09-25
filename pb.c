@@ -1161,6 +1161,7 @@ time_t get_file_last_mod_time(char *filepath) {
  * seconds as a double */
 // TODO: API uses GMT, localtime seems to be given in BST, so a delta will be
 // shown even if there is none
+
 double time_since_last_mod(char *file) {
   struct tm file_tm;
   struct tm current_tm;

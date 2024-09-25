@@ -55,7 +55,7 @@ FILE * se = NULL;
 #define V(...) \
 { \
 	if (opt_verbose) { \
-	fprintf(se, "Verbose: "); \
+	fprintf(se, "Verbose (%s:%i): ", __FILE__, __LINE__); \
 	fprintf(se, __VA_ARGS__); \
 	fprintf(se, "\n"); \
 	} \
