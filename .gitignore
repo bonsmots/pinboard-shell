@@ -6,6 +6,8 @@ main.dSYM
 pb
 pb.dSYM
 yajl
+tests
+.vscode/*
 
 # From https://github.com/github/gitignore/blob/master/C.gitignore
 

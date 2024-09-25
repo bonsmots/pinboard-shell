@@ -23,15 +23,17 @@ void chch(char from, char to, char *string, int len) {
   }
 }
 
-// TODO: obviously not secure -- needs redoing in a secure way
-// i.e. with the buffer length set
+// ask_string gets a string as input
+// TODO: obviously not secure -- needs redoing in a secure way i.e. with the buffer length set
+// not tested
 char *ask_string(char *message, char *input) {
   printf("%s", message);
   scanf("%s", input);
   return input;
 }
 
-// Returns string length if not NULL
+// strval returns string length if not NULL
+// tested in tests.c
 int strval(char *str) {
   if (str)
     return strlen(str);
