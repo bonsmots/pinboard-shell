@@ -1,6 +1,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>   // open
 
+#include "macros.h"
+
 // Crudely prints file to stdout
 // UNUSED
 int simple_output(char *filedir, char *verb) {

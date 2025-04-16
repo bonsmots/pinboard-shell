@@ -1,3 +1,19 @@
+#if !defined(MACROS_H)
+#define MACROS_H
+#endif
+
+#include <stdbool.h> // C99 bool type
+
+/*
+ * More option globals
+ * Note: not in the options struct for ease of use w/ macros
+ */
+
+bool opt_debug;
+bool opt_super_debug;
+bool opt_verbose;
+bool opt_trace;
+
 /*
  * Macros
  */
@@ -8,7 +24,7 @@
 
 /** Set this to \c 's' to stop the program on an error.
  * Otherwise, functions return a value on failure.*/
-char error_mode = 's';
+char error_mode = 'z';
 /** To where should I write errors? If this is \c NULL, write to \c stderr. */
 FILE *error_log;
 
@@ -27,6 +43,7 @@ FILE *error_log;
 
 /* So we can easily send stderr to stdout */
 /* We have to make it NULL here to avoid compiler errors */
+
 FILE *se = NULL;
 /* FILE * se = stderr; */
 
@@ -36,8 +53,8 @@ FILE *se = NULL;
 	{                                                                        \
 		if (opt_trace)                                                       \
 		{                                                                    \
-			fprintf(stdout, "Trace: %s at line %i", __FUNCTION__, __LINE__); \
-			fprintf(stdout, "\n");                                           \
+			fprintf(se, "%s:%s:%i", __FILE__, __FUNCTION__, __LINE__); \
+			fprintf(se, "\n");                                           \
 		}                                                                    \
 	}
 
@@ -123,7 +140,7 @@ FILE *se = NULL;
 	}
 
 // Safe free
-#define Sfree(buf)       \
+#define Safe_free(buf)       \
 	{                    \
 		if (buf != NULL) \
 			free(buf);   \

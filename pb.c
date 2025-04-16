@@ -106,12 +106,7 @@ extern int daylight;
  * Headers -- local
  */
 
-#include "yajl/yajl_gen.h"
-#include "yajl/yajl_parse.h"
-#include "yajl/yajl_tree.h"
-
 #include "helper.c"
-#include "macros.h"
 
 /*
  * Option globals
@@ -122,10 +117,10 @@ extern int daylight;
  * Note: not in the options struct for ease of use w/ macros
  */
 
-bool opt_debug;
-bool opt_super_debug;
-bool opt_verbose;
-bool opt_trace;
+extern bool opt_debug;
+extern bool opt_super_debug;
+extern bool opt_verbose;
+extern bool opt_trace;
 
 /*
  * Main options struct
@@ -133,7 +128,7 @@ bool opt_trace;
 
 struct {
   bool remote;
-  bool output;
+  bool print_output;
   bool autoupdate;
   bool force_update;
   bool del;
@@ -148,6 +143,7 @@ struct {
   char *add_url;
   char *add_title;
   char *search_str;
+  int print_max_items;
 } options;
 
 /*
@@ -173,70 +169,42 @@ typedef struct {
   char *tags;
 } bookmark;
 
-/*
- * YAJL callback functions -- per the YAJL documentation
+// To keep track of the number of printed items
+int printed_items = 0;
+
+/**
+ * @brief Check the environment variables for the username and password
+ *
+ * @return void
  */
+void check_env_variables() {
+  char *s_user = "PB_USER";
+  char *s_pass = "PB_PASS";
 
-static int reformat_null(void *ctx) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_null(g);
+  char *s_user_env;
+  char *s_pass_env;
+
+  s_user_env = getenv(s_user);
+  s_pass_env = getenv(s_pass);
+
+  Trace();
+
+  Dbg("getenv %s: %s", s_user, s_user_env);
+  Dbg("getenv %s: %s", s_pass, "****");
+
+  if (s_user_env != NULL) {
+    asprintf(&options.username, "%s", s_user_env);
+  }
+
+  if (s_pass_env != NULL) {
+    asprintf(&options.password, "%s", s_pass_env);
+  }
+
+  return;
 }
-
-static int reformat_boolean(void *ctx, int boolean) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_bool(g, boolean);
-}
-
-static int reformat_number(void *ctx, const char *s, size_t l) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_number(g, s, l);
-}
-
-static int reformat_string(void *ctx, const unsigned char *stringVal, size_t stringLen) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
-}
-
-static int reformat_map_key(void *ctx, const unsigned char *stringVal, size_t stringLen) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
-}
-
-static int reformat_start_map(void *ctx) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_map_open(g);
-}
-
-static int reformat_end_map(void *ctx) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_map_close(g);
-}
-
-static int reformat_start_array(void *ctx) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_array_open(g);
-}
-
-static int reformat_end_array(void *ctx) {
-  yajl_gen g = (yajl_gen)ctx;
-  return yajl_gen_status_ok == yajl_gen_array_close(g);
-}
-
-// TODO: should explain
-static yajl_callbacks callbacks = {reformat_null,
-                                   reformat_boolean,
-                                   NULL,
-                                   NULL,
-                                   reformat_number,
-                                   reformat_string,
-                                   reformat_start_map,
-                                   reformat_map_key,
-                                   reformat_end_map,
-                                   reformat_start_array,
-                                   reformat_end_array};
 
 // Does directory exist with sensible permissions? If not, create it.
-int check_dir(char *dirpath) {
+int check_working_dir(char *dirpath) {
   struct stat buffer;
   int status;
   int fildes;
@@ -366,7 +334,7 @@ int make_file(char *filepath) {
 /* TODO: check against https://curl.se/libcurl/c/https.html */
 
 // Pulls file at URL using CURL, writes to filepath
-int curl_grab(char *url, char *filepath, char *username, char *password) {
+int pinboard_api_download(char *url, char *filepath, char *username, char *password) {
   CURL *curl;
   CURLcode res;
   FILE *fp;
@@ -415,7 +383,7 @@ int curl_grab(char *url, char *filepath, char *username, char *password) {
 }
 
 // TODO: ?
-int curl_jam(char *url, char *username, char *password) {
+int pinboard_api(char *url, char *username, char *password) {
   CURL *curl;
   CURLcode res;
   bool curl_success;
@@ -454,13 +422,13 @@ int curl_jam(char *url, char *username, char *password) {
 
 // Outputs filedir/verb.json to stdout, nicely formatted
 int pretty_json_output(char *filedir, char *verb) {
-  yajl_handle hand;
+  yajl_handle handle;
 
   /* 65kb buffer */
   static unsigned char fileData[65536];
 
   /* generator config */
-  yajl_gen g;
+  yajl_gen gen;
   yajl_status stat;
   size_t read_size;
   int return_val = 0;
@@ -478,19 +446,19 @@ int pretty_json_output(char *filedir, char *verb) {
   }
 
   // Can specify our own memory allocator, NULL means use default
-  g = yajl_gen_alloc(NULL);
+  gen = yajl_gen_alloc(NULL);
 
   // Nice-looking output
-  yajl_gen_config(g, yajl_gen_beautify, 1);
+  yajl_gen_config(gen, yajl_gen_beautify, 1);
 
   // Check input is UTF-8
-  yajl_gen_config(g, yajl_gen_validate_utf8, 1);
+  yajl_gen_config(gen, yajl_gen_validate_utf8, 1);
 
   /* ok.  open file.  let's read and parse */
-  hand = yajl_alloc(&callbacks, NULL, (void *)g);
+  handle = yajl_alloc(&callbacks, NULL, (void *)gen);
 
   /* and let's allow comments by default */
-  yajl_config(hand, yajl_allow_comments, 1);
+  yajl_config(handle, yajl_allow_comments, 1);
 
   for (;;) {
     read_size = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
@@ -506,7 +474,7 @@ int pretty_json_output(char *filedir, char *verb) {
 
     fileData[read_size] = 0;
 
-    stat = yajl_parse(hand, fileData, read_size);
+    stat = yajl_parse(handle, fileData, read_size);
 
     if (stat != yajl_status_ok) {
       break;
@@ -516,23 +484,23 @@ int pretty_json_output(char *filedir, char *verb) {
       const unsigned char *buf;
       size_t len;
 
-      yajl_gen_get_buf(g, &buf, &len);
+      yajl_gen_get_buf(gen, &buf, &len);
       fwrite(buf, 1, len, stdout);
-      yajl_gen_clear(g);
+      yajl_gen_clear(gen);
     }
   }
 
-  stat = yajl_complete_parse(hand);
+  stat = yajl_complete_parse(handle);
 
   if (stat != yajl_status_ok) {
-    unsigned char *str = yajl_get_error(hand, 1, fileData, read_size);
+    unsigned char *str = yajl_get_error(handle, 1, fileData, read_size);
     fprintf(se, "%s", (const char *)str);
-    yajl_free_error(hand, str);
+    yajl_free_error(handle, str);
     return_val = 1;
   }
 
-  yajl_gen_free(g);
-  yajl_free(hand);
+  yajl_gen_free(gen);
+  yajl_free(handle);
   fclose(fp);
 
   free(filename);
@@ -541,7 +509,7 @@ int pretty_json_output(char *filedir, char *verb) {
 
 // API bits
 
-int api_del(char *username, char *password, char *webaddr) {
+int pinboard_api_del(char *username, char *password, char *webaddr) {
   char *url;
   char *escaped_url;
   int retval = -1;
@@ -560,7 +528,7 @@ int api_del(char *username, char *password, char *webaddr) {
 
   V("Using:\n%s as URL\n", url);
 
-  retval = curl_jam(url, username, password);
+  retval = pinboard_api(url, username, password);
 
   free(url);
   curl_free(escaped_url);
@@ -568,29 +536,29 @@ int api_del(char *username, char *password, char *webaddr) {
   return retval;
 }
 
-int api_add(char *username, char *password, char *webaddr, char *title) {
-  char *url;
+int pinboard_api_add(char *username, char *password, char *url, char *title) {
+  char *api_url;
   char *escaped_url;
   char *escaped_title;
   int retval = -1;
   Trace();
 
-  if (!strval(username) || !strval(password) || !strval(webaddr) || !strval(title)) {
+  if (!strval(username) || !strval(password) || !strval(url) || !strval(title)) {
     return -1;
   }
 
   CURL *curl;
   curl = curl_easy_init();
-  escaped_url = curl_easy_escape(curl, webaddr, 0);
+  escaped_url = curl_easy_escape(curl, url, 0);
   escaped_title = curl_easy_escape(curl, title, 0);
 
-  asprintf(&url, "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", escaped_url, escaped_title);
+  asprintf(&api_url, "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", escaped_url, escaped_title);
 
-  V("Using:\n%s as URL\n", url);
+  V("Using:\n%s as URL\n", api_url);
 
-  retval = curl_jam(url, username, password);
+  retval = pinboard_api(api_url, username, password);
 
-  free(url);
+  free(api_url);
   curl_free(escaped_url);
   curl_free(escaped_title);
   curl_easy_cleanup(curl); /* always cleanup */
@@ -598,7 +566,7 @@ int api_add(char *username, char *password, char *webaddr, char *title) {
 }
 
 // Wrapper for downloading with the API
-int api_download(char *verb, char *username, char *password, char *directory) {
+int pinboard_api_download_wrapper(char *verb, char *username, char *password, char *directory) {
   char *url;
   char *filepath;
 
@@ -617,12 +585,9 @@ int api_download(char *verb, char *username, char *password, char *directory) {
 
   make_file(filepath);
 
-  V("Using:\n"
-    "%s as filepath\n"
-    "%s as URL\n",
-    filepath, url);
+  V("Using: %s as filepath, %s as URL\n", filepath, url);
 
-  curl_grab(url, filepath, username, password);
+  pinboard_api_download(url, filepath, username, password);
 
   free(url);
   free(filepath);
@@ -638,11 +603,11 @@ void del_prompt(char *url) {
     exit(0);
   }
   if (strcasestr(b1, "y")) {
-    api_del(options.username, options.password, url);
+    pinboard_api_del(options.username, options.password, url);
   }
 }
 
-int parse_handoff(unsigned char *buf, size_t len) {
+int json_parse_and_print(unsigned char *buf, size_t len) {
   /*
    * buf of size len is provided from YAJL and then passed in via
    * argument
@@ -674,11 +639,11 @@ int parse_handoff(unsigned char *buf, size_t len) {
 
   /* Replace separator signifier with something else to avoid confusing the
    * seperator logic later on */
-  chch(sep, '-', (char *)loc2, len);
+  swapchar(sep, '-', (char *)loc2, len);
 
   /* Replace \" within any of the fields with ' as the former breaks the parser
    */
-  swpch("\\\"", "\'\'", (char *)loc3, len);
+  swapchars("\\\"", "\'\'", (char *)loc3, len);
 
   /*
    * The below removes everyting except tag and value, adding sep
@@ -721,16 +686,15 @@ int parse_handoff(unsigned char *buf, size_t len) {
   char *cp = NULL;
   char *dp = NULL;
   char tokens[] = {sep, '\0'};
-  pair pairs[between_quotes_n];  // TODO: 2 x as big as needed ? Not worried as
-                                 // essentially a buffer value
-  bookmark bm[between_quotes_n]; // Same comment
+  pair pairs[between_quotes_n];         // TODO: 2 x as big as needed ? Not worried as essentially a buffer value
+  bookmark bookmarks[between_quotes_n]; // Same comment
   int count = 0;
   int bm_count = 0;
   int i = 0;
   bool tag = true;
 
   cp = strtok(spare, tokens); /* Breaks string into tokens -- first token */
-  Null_bookmarks(bm, between_quotes_n);
+  Null_bookmarks(bookmarks, between_quotes_n);
 
   /* TODO: remove strtok as depreciated */
   while (1) {
@@ -738,8 +702,7 @@ int parse_handoff(unsigned char *buf, size_t len) {
       break;
     }
 
-    dp = strdup(cp); /* strdup returns pointed to malloc'd copy, thus dp is a
-                        new string */
+    dp = strdup(cp); /* strdup returns pointed to malloc'd copy, thus dp is a new string */
     if (dp == NULL) {
       Ftl("Failed strdup, likely malloc issue");
     }
@@ -759,6 +722,7 @@ int parse_handoff(unsigned char *buf, size_t len) {
 
   Dbg("Tokenising complete on %i strings", count);
 
+  // TODO: remove
   if (opt_super_debug)
     for (int j = 0; j < count; j++) {
       printf("%s %s\n", pairs[j].tag, pairs[j].value);
@@ -768,26 +732,27 @@ int parse_handoff(unsigned char *buf, size_t len) {
     /* If any of the tag strings are the strings we are interested in */
     if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags") ||
         strstr(pairs[j].tag, "hash")) {
-      /* Put the values in */
-      /* strstr() returns the pointer to first occurance of substring in the
-       * sring */
-      /* Point the bm struct pointers to the values in the pair structs */
+
+      /* Put the values in
+       * strstr() returns the pointer to first occurrence of substring in the string
+       * Point the bm struct pointers to the values in the pair structs */
+
       if (strstr(pairs[j].tag, "hash")) {
-        bm[i].hash = pairs[j].value;
+        bookmarks[i].hash = pairs[j].value;
       }
       if (strstr(pairs[j].tag, "href")) {
-        bm[i].href = pairs[j].value;
+        bookmarks[i].href = pairs[j].value;
       }
       if (strstr(pairs[j].tag, "description")) {
-        bm[i].desc = pairs[j].value;
+        bookmarks[i].desc = pairs[j].value;
       }
       if (strstr(pairs[j].tag, "tags")) {
-        bm[i].tags = pairs[j].value;
+        bookmarks[i].tags = pairs[j].value;
       }
 
       /* If now all non-null values, increment */
       /* bm_count used when we print to screen so know when done */
-      if (strval(bm[i].hash) && strval(bm[i].href) && strval(bm[i].desc) && strval(bm[i].tags)) {
+      if (strval(bookmarks[i].hash) && strval(bookmarks[i].href) && strval(bookmarks[i].desc) && strval(bookmarks[i].tags)) {
         i++;
         bm_count++;
       }
@@ -795,35 +760,44 @@ int parse_handoff(unsigned char *buf, size_t len) {
   }
 
   if (!bm_count) {
+    Dbg("bm_count is 0");
     return 0; /* Saves below being executed with 0 */
   }
 
   Dbg("In bookmark array with %i bookmarks", bm_count);
 
+  if (options.print_max_items > 0) {
+    Dbg("Only printing max %i items", options.print_max_items);
+  } else {
+    // Hacky garbage value so it doesn't interfere
+    options.print_max_items = bm_count;
+  }
+
   /*
    * OUTPUT LOOP
    */
 
-  for (int j = 0; j < bm_count; j++) {
+  for (int j = 0; j < bm_count && printed_items < options.print_max_items; j++) {
+    printed_items += 1;
     // If this is set we are searching, otherwise we are listing
     if (strval(options.search_str)) {
-      if ((strcasestr(bm[j].hash, options.search_str) != NULL) || (strcasestr(bm[j].desc, options.search_str) != NULL) ||
-          (strcasestr(bm[j].href, options.search_str) != NULL)) {
+      if ((strcasestr(bookmarks[j].hash, options.search_str) != NULL) || (strcasestr(bookmarks[j].desc, options.search_str) != NULL) ||
+          (strcasestr(bookmarks[j].href, options.search_str) != NULL)) {
         if (options.no_colours) {
           if (options.hashes) {
-            printf("%s\n", bm[j].hash);
+            printf("%s\n", bookmarks[j].hash);
           }
-          printf("%s\n", bm[j].desc);
-          printf("%s\n", bm[j].href);
+          printf("%s\n", bookmarks[j].desc);
+          printf("%s\n", bookmarks[j].href);
         } else {
           if (options.hashes) {
-            printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+            printf("%s%s%s\n", clr[1], bookmarks[j].hash, clr[0]);
           }
-          printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
-          printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+          printf("%s%s%s\n", clr[3], bookmarks[j].desc, clr[0]);
+          printf("%s%s%s\n", clr[2], bookmarks[j].href, clr[0]);
         }
         if (options.del) {
-          del_prompt(bm[j].href);
+          del_prompt(bookmarks[j].href);
         }
       }
     } else {
@@ -832,27 +806,27 @@ int parse_handoff(unsigned char *buf, size_t len) {
         // printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
         if (!options.tags_only) {
           if (options.hashes) {
-            printf("%s\n", bm[j].hash);
+            printf("%s\n", bookmarks[j].hash);
           }
-          printf("%s\n", bm[j].desc);
-          printf("%s\n", bm[j].href);
+          printf("%s\n", bookmarks[j].desc);
+          printf("%s\n", bookmarks[j].href);
         }
         /* Note we exclude tag string if short enough to be empty */
-        if (!options.no_tags && (strlen(bm[j].tags) > 1)) {
-          printf("%s\n", bm[j].tags);
+        if (!options.no_tags && (strlen(bookmarks[j].tags) > 1)) {
+          printf("%s\n", bookmarks[j].tags);
         }
       } else {
         // printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
         if (!options.tags_only) {
           if (options.hashes) {
-            printf("%s%s%s\n", clr[1], bm[j].hash, clr[0]);
+            printf("%s%s%s\n", clr[1], bookmarks[j].hash, clr[0]);
           }
-          printf("%s%s%s\n", clr[3], bm[j].desc, clr[0]);
-          printf("%s%s%s\n", clr[2], bm[j].href, clr[0]);
+          printf("%s%s%s\n", clr[3], bookmarks[j].desc, clr[0]);
+          printf("%s%s%s\n", clr[2], bookmarks[j].href, clr[0]);
         }
         /* Note we exclude tag string if short enough to be empty */
-        if (!options.no_tags && (strlen(bm[j].tags) > 1)) {
-          printf("%s%s%s\n", clr[4], bm[j].tags, clr[0]);
+        if (!options.no_tags && (strlen(bookmarks[j].tags) > 1)) {
+          printf("%s%s%s\n", clr[4], bookmarks[j].tags, clr[0]);
         }
       }
     }
@@ -869,7 +843,7 @@ int parse_handoff(unsigned char *buf, size_t len) {
 }
 
 // Sets up YAJL then sends to parse_handoff
-int output(char *filedir, char *verb) {
+int print_json_output(char *filedir, char *verb) {
   yajl_handle hand;
   /* TODO: find out how large the file is and make buffer the right size
    * accordingly */
@@ -932,7 +906,7 @@ int output(char *filedir, char *verb) {
 
       yajl_gen_get_buf(g, &buf, &len);
       Dbg("Parsing");
-      parse_handoff((unsigned char *)buf, len);
+      json_parse_and_print((unsigned char *)buf, len);
       yajl_gen_clear(g);
     }
   }
@@ -992,9 +966,6 @@ char *file_to_mem(char *directory, char *verb, int *size) {
   close(fildes);
   free(filepath);
 
-  // NUL terminate
-  //*(data+1) = '\0';
-
   return data;
 }
 
@@ -1038,91 +1009,63 @@ void simple_parse_field(int field, char delim, char *data_from, char *data_to, i
   return;
 }
 
-/*
- * Takes string in iso8601 format
- * Returns time_t
- * Note: pinboard API seems to always assume the time is GMT, so that is what we
- * do here
- * http://stackoverflow.com/questions/26895428/how-do-i-parse-an-iso-8601-date-with-optional-milliseconds-to-a-struct-tm-in-c
+/**
+ * @brief Converts an ISO 8601 formatted date string to a time_t value
+ *
+ * This function parses an ISO 8601 formatted date string (YYYY-MM-DDThh:mm:ssZ)
+ * and converts it to a time_t value. The function assumes the input time is in GMT,
+ * which is consistent with the Pinboard API's behavior.
+ *
+ * @param iso8601_str A string containing the ISO 8601 formatted date
+ * @return time_t The converted time value
+ *
+ * @see http://stackoverflow.com/questions/26895428/how-do-i-parse-an-iso-8601-date-with-optional-milliseconds-to-a-struct-tm-in-c
  */
-
-time_t convert_iso8601(char *dt_string) {
-  int y, M, d, h, m;
-  float s;
+time_t convert_iso8601(char *iso8601_str) {
+  int year, month, day, hour, minute;
+  float second;
   struct tm time;
 
   Trace();
 
-  sscanf(dt_string, "%d-%d-%dT%d:%d:%fZ", &y, &M, &d, &h, &m, &s);
+  // Extract relevent values from the ISO 8601 string
+  sscanf(iso8601_str, "%d-%d-%dT%d:%d:%fZ", &year, &month, &day, &hour, &minute, &second);
 
-  time.tm_year = y - 1900; // Year since 1900
-  time.tm_mon = M - 1;     // 0-11
-  time.tm_mday = d;        // 1-31
-  time.tm_hour = h;        // 0-23
-  time.tm_min = m;         // 0-59
-  time.tm_sec = (int)s;    // 0-61 (0-60 in C++11)
+  // Fill out the tm struct
+  time.tm_year = year - 1900; // Year since 1900
+  time.tm_mon = month - 1;    // 0-11
+  time.tm_mday = day;         // 1-31
+  time.tm_hour = hour;        // 0-23
+  time.tm_min = minute;       // 0-59
+  time.tm_sec = (int)second;  // 0-61 (0-60 in C++11)
   // time.tm_isdst = 0;
 
+  // Return the time_t value
   return mktime(&time);
 }
 
-int check_update() {
-  Trace();
-  puts("TODO: check for updates");
-  return 0;
-}
-
-/* Unused
-int sanitise_json(char *directory)
-{
-    Trace();
-
-    char *b = NULL;
-    char *b2 = NULL;
-    int b_len;
-
-    b = file_to_mem(directory, "all", &b_len);
-    V("Read %d bytes from file_to_mem", b_len);
-    b2 = b;
-
-    swpch("\\\"", "--", b, b_len);
-
-    char *filename;
-    asprintf(&filename, "%s/%s.json", directory, "all_san");
-
-    FILE *fp = fopen(filename, "w");
-
-    if (fp == NULL)
-    {
-            printf("Error opening file!\n"); exit(1);
-    }
-
-    fputs(b2,fp);
-    fclose(fp);
-
-    free(filename);
-    free(b);
-
-    return 0;
-}
-*/
-
-time_t get_file_last_mod_time(char *filepath) {
-  int fildes;
-  struct stat buffer;
+/**
+ * @brief Get the last modified time of a file
+ *
+ * @param filepath The path to the file
+ * @return time_t The last modified time of the file
+ */
+time_t last_modified_time(char *filepath) {
+  int fd;
+  struct stat stat_;
 
   Trace();
   V("Opening file %s", filepath);
 
-  fildes = open(filepath, O_RDONLY);
-  if (fildes < 0) {
+  fd = open(filepath, O_RDONLY);
+  if (fd < 0) {
     Ftl("Cannot open %s", filepath);
   }
 
-  fstat(fildes, &buffer);
-  close(fildes);
+  fstat(fd, &stat_);
+  close(fd);
 
-  return buffer.st_mtime;
+  return stat_.st_mtime;
 }
 
 /* Get age of file -- returns 'age' (i.e. time since last modified) of file in
@@ -1130,7 +1073,7 @@ time_t get_file_last_mod_time(char *filepath) {
 // TODO: API uses GMT, localtime seems to be given in BST, so a delta will be
 // shown even if there is none
 
-double time_since_last_mod(char *file) {
+double time_since_last_modified(char *file) {
   struct tm file_tm;
   struct tm current_tm;
   time_t file_last_mod;
@@ -1141,7 +1084,7 @@ double time_since_last_mod(char *file) {
 
   Trace();
 
-  file_last_mod = get_file_last_mod_time(file);
+  file_last_mod = last_modified_time(file);
 
   localtime_r(&file_last_mod, &file_tm);
   Zero_char(buffer, sizeof(buffer));
@@ -1168,7 +1111,7 @@ bool is_file_more_recent(char *file, struct tm dt_tm) {
 
   Trace();
 
-  file_last_mod = get_file_last_mod_time(file);
+  file_last_mod = last_modified_time(file);
   localtime_r(&file_last_mod, &file_tm);
 
   Zero_char(buffer, sizeof(buffer));
@@ -1202,7 +1145,7 @@ int auto_update(char *filepath, char *username, char *password) {
 
   if (!does_file_exist(buffer)) {
     V("%s doesn't seem to exist, pulling", buffer);
-    api_download("all", username, password, filepath);
+    pinboard_api_download_wrapper("all", username, password, filepath);
   }
 
   /* Check when update.json last updated */
@@ -1212,15 +1155,15 @@ int auto_update(char *filepath, char *username, char *password) {
   /* If it doesn't exist, download it */
   if (!does_file_exist(buffer)) {
     V("Downloading")
-    api_download("update", username, password, filepath);
+    pinboard_api_download_wrapper("update", username, password, filepath);
   }
 
-  time_since_update = time_since_last_mod(buffer);
+  time_since_update = time_since_last_modified(buffer);
 
   /* D/l if stale */
   if (time_since_update >= (5 * 60)) { /* If greater than 5 mins have elapsed */
     V("Update info is >5 mins old, updating");
-    api_download("update", username, password, filepath);
+    pinboard_api_download_wrapper("update", username, password, filepath);
   } else {
     V("Update info is <5 mins old, not updating");
   }
@@ -1246,7 +1189,7 @@ int auto_update(char *filepath, char *username, char *password) {
     V("We are up to date according to API");
   } else {
     V("We are not up to date according to API, updating");
-    api_download("all", username, password, filepath);
+    pinboard_api_download_wrapper("all", username, password, filepath);
     /* We also delete update.json to force this to be updated next time run */
     Zero_char(buffer, sizeof(buffer));
     snprintf(buffer, sizeof(buffer), "%s/%s", filepath, "update.json");
@@ -1273,7 +1216,7 @@ void force_update(char *filepath, char *username, char *password) {
     // V("Failed to delete %s", buffer);
   } else {
     V("%s deleted", buffer);
-    api_download("update", username, password, filepath);
+    pinboard_api_download_wrapper("update", username, password, filepath);
   }
 
   /* Delete all.json and re-download */
@@ -1283,95 +1226,47 @@ void force_update(char *filepath, char *username, char *password) {
     V("Failed to delete %s", buffer);
   } else {
     V("%s deleted", buffer);
-    api_download("all", username, password, filepath);
+    pinboard_api_download_wrapper("all", username, password, filepath);
   }
 
   return;
 }
 
-void check_env_variables() {
-  char *s_user = "PB_USER";
-  char *s_pass = "PB_PASS";
+char *get_working_directory() {
+  // See
+  // https://pubs.opengroup.org/onlinepubs/007904975/functions/getcwd.html
 
-  char *s_user_env;
-  char *s_pass_env;
+  long size;
+  char *buf;
+  char *ptr = NULL;
 
-  s_user_env = getenv(s_user);
-  s_pass_env = getenv(s_pass);
+  size = pathconf(".", _PC_PATH_MAX);
 
-  Trace();
-
-  Dbg("getenv %s: %s", s_user, s_user_env);
-  Dbg("getenv %s: %s", s_pass, s_pass_env);
-
-  if (s_user_env != NULL) {
-    asprintf(&options.username, "%s", s_user_env);
+  if ((buf = (char *)malloc((size_t)size)) != NULL) {
+    ptr = getcwd(buf, (size_t)size);
   }
 
-  if (s_pass_env != NULL) {
-    asprintf(&options.password, "%s", s_pass_env);
-  }
-
-  return;
+  return ptr;
 }
 
 int main(int argc, char *argv[]) {
   /* Pointer to string of filepath where working files are located */
-  char *filepath = NULL;
-
-  char msg_warn[] = "NOTE: CURRENTLY STILL IN DEVELOPMENT";
-
-  char msg_usage[] = "______________\n"
-                     "pinboard-shell\n"
-                     "______________\n"
-                     "\n"
-                     "Usage:\n"
-                     "ADD:\n"
-                     "-t Title -u \"https://url.com/\" \n"
-                     "DELETE:\n"
-                     "-r \"string\" \n"
-                     "SEARCH:\n"
-                     "-s \"string\"\n"
-                     "LIST:\n"
-                     "-o flag to list data\n"
-                     "-w do not output tags\n"
-                     "-c toggle tags only\n"
-                     "-p turn off formatting e.g. for redirecting stdout to a file\n"
-                     "UPDATE:\n"
-                     "-a auto update: updates if the API says it has updated since last "
-                     "downloaded\n"
-                     "-f force update: forces update\n" /* TODO: check flow control */
-                     "OTHER:\n"
-                     "-v toggle verbose\n"
-                     "-d turn debug mode on\n"
-                     "-h this help\n"
-                     "\n"
-                     "Example usage:\n"
-                     "Download bookmarks file from pinboard.in\n"
-                     "./pb -f\n"
-                     "OR\n"
-                     "Output only\n"
-                     "./pb -o\n"
-                     "\n"
-                     "Further example usage:\n"
-                     "List most frequent tags:\n./pb -ocp | sort | awk '{ print $NF }' | uniq "
-                     "-c | sort -nr | less\n"
-                     "List those tagged with $TAG for export to a file:\n./pb -op | grep "
-                     "--color=never -B2 $TAG > $TAG.tagged\n"
-                     "\n";
-
-  error_mode = 's'; /* Makes Stopif use abort() */
+  char *working_filepath = NULL;
+  // Used with getopt
   int c;
-  bool errflg = false;
-  int exitflg = 0;
-  int ret = 0;
+  // Toggle to show usage
+  bool show_usage = false;
 
-  options.remote = false; /* default is we assume do not need to make
-                             request/have username/pass */
-  options.output = false;
+  /* default is we assume do not need to make request */
+  options.remote = false;
+  // stdout is used for output
+  options.print_output = false;
+  // auto update is disabled
   options.autoupdate = false;
+  // username and password are not set
   options.username = NULL;
   options.password = NULL;
+  // force update is disabled
   options.force_update = false;
 
   /*
@@ -1384,62 +1279,86 @@ int main(int argc, char *argv[]) {
   options.no_colours = false;
   options.no_tags = false;
   options.tags_only = false;
+  options.print_max_items = 0; // 0 means all
 
   /* Required for getopt */
   extern char *optarg;
   extern int optind, optopt;
 
+  /* Send stderr to stdout */
   se = stdout;
-  /* se = stderr; */
+  // se = stderr;
+
+  /* Let's cheekily see what the current working directory is, and if it's a development directory, we will turn on verbose and debug */
+  char *working_directory = get_working_directory();
+  if (strstr(working_directory, "pinboard-shell")) {
+    opt_verbose = true;
+    opt_debug = true;
+    opt_trace = true;
+    options.print_max_items = 5;
+  }
+  Safe_free(working_directory);
+
+  // TODO: add print_max arg
 
   /* getopt loop per example at
    * http://pubs.opengroup.org/onlinepubs/009696799/functions/getopt.html */
   while ((c = getopt(argc, argv, ":zafcovdhwzpu:t:s:r:")) != -1) {
     switch (c) {
+    // (S)earch
     case 's':
-      options.output = true;
+      options.print_output = true;
       options.remote = false; // EDITED
       opt_verbose = false;    // Required to work properly
       asprintf(&options.search_str, "%s", optarg);
       Dbg("Searching");
       break;
+    // (A)uto update
     case 'a':
       options.autoupdate = true;
       options.remote = true;
       Dbg("Autoupdate");
       break;
+    // (F)orce update
     case 'f':
       options.force_update = true;
       options.autoupdate = false;
       options.remote = true;
       Dbg("Forced update");
       break;
+    // (P)rint
     case 'p':
       options.no_colours = true;
       Dbg("Printing with no colours");
       break;
+    // ?
     case 'c':
       options.tags_only = true;
       Dbg("Tags only");
       break;
+    // (W)ithout tags
     case 'w':
       options.no_tags = true;
       Dbg("No tags");
       break;
+    // (O)utput
     case 'o':
-      options.output = true;
+      options.print_output = true;
       options.autoupdate = false;
       Dbg("Output toggled");
       break;
+    // ?
     case 'z':
       options.remote = true;
       // opt_super_debug = true;
       // Dbg("Superdebug toggled");
       break;
+    // (V)erbose
     case 'v':
       opt_verbose = !opt_verbose;
       Dbg("Verbose toggled");
       break;
+    // (D)ebug
     case 'd':
       opt_verbose = true;
       opt_trace = true;
@@ -1447,45 +1366,51 @@ int main(int argc, char *argv[]) {
       error_mode = 's'; /* Makes Stopif use * abort() */
       Dbg("Debug mode set");
       break;
+    // (H)elp
     case 'h':
-      errflg = true; // i.e. show help
+      show_usage = true; // i.e. show help
       break;
+    // Delete
     case 'r':
       options.remote = true;
       options.del = true;
-      options.output = true; // required to run through the loop
+      options.print_output = true; // required to run through the loop
       asprintf(&options.search_str, "%s", optarg);
       Dbg("Deleting");
       break;
+    // (T)itle for addition of new bookmark
     case 't':
       options.remote = true;
       options.add = true;
       asprintf(&options.add_title, "%s", optarg);
       break;
+    // (U)rl for addition of new bookmark
     case 'u':
       options.remote = true;
       options.add = true;
       asprintf(&options.add_url, "%s", optarg);
       break;
-    case ':': /* Option req argument without argument */
+    // (:) Option requires argument without argument
+    case ':':
       fprintf(se, "Option -%c requires an operand\n", optopt);
-      errflg = true;
+      show_usage = true;
       break;
+    // (?) Unrecognized option
     case '?':
       fprintf(se, "Unrecognized option: -%c\n", optopt);
-      errflg = true;
+      show_usage = true;
     }
   }
 
-  /* Print warning message */
-  puts(msg_warn);
-
+  /* Print what toggles have been toggled */
   if (opt_verbose) {
     V("Verbose mode on");
   }
+
   if (opt_trace) {
     V("Tracing mode on");
   }
+
   if (opt_debug) {
     V("Debugging mode on");
   }
@@ -1493,22 +1418,16 @@ int main(int argc, char *argv[]) {
   check_env_variables(); /* Checks env variables for user/pass combo */
 
   /* Some issue -- print usage message */
-  if (errflg) {
-    fprintf(se, "%s", msg_usage);
-    return 2;
+  if (show_usage) {
+    return print_usage();
   }
 
-  /* Some issue -- return */
-  if (exitflg) {
-    return exitflg;
-  }
-
-  tzset(); /* Set timezone I do believe */
+  tzset(); /* Set timezone */
   Dbg("tzname: %s,%s timezone: %li daylight: %i", tzname[0], tzname[1], timezone, daylight);
 
   /* Username and password are set */
   if (options.username && options.password) {
-    Dbg("Using: %s as username, %s as password", options.username, options.password);
+    Dbg("Using: %s as username, %s as password", options.username, "****");
     /* Ask for them if not set and we are needing to connect */
   } else if (options.remote && (!options.username || !options.password)) {
     char b1[512];
@@ -1527,44 +1446,46 @@ int main(int argc, char *argv[]) {
 
   /* If these are both set we want to add and then quit */
   if (strval(options.add_url) && strval(options.add_title)) {
-    api_add(options.username, options.password, options.add_url, options.add_title);
+    pinboard_api_add(options.username, options.password, options.add_url, options.add_title);
   }
 
   /*
-   * Steps > See if JSON file exists and is not old > If not, download
-   * with libcurl > Parse > Output > Other functions if required
+   * Steps > See if JSON file exists and is not old
+   * > If not, download with libcurl
+   * > Parse
+   * > Output
+   * > Other functions if required
    */
 
   /* Look in ~/.pinboard and check we can write to it */
+  asprintf(&working_filepath, "%s/%s", getenv("HOME"), ".pinboard");
 
-  asprintf(&filepath, "%s/%s", getenv("HOME"), ".pinboard");
   // Dbg("Looking in %s", filepath);
-  check_dir(filepath);
+  check_working_dir(working_filepath);
 
   if (options.force_update && options.remote) {
-    force_update(filepath, options.username, options.password);
+    force_update(working_filepath, options.username, options.password);
   }
 
   if (options.autoupdate && options.remote) {
-    auto_update(filepath, options.username, options.password);
+    auto_update(working_filepath, options.username, options.password);
   }
 
-  if (options.output) {
-    output(filepath, "all");
+  // Print any output
+  // "all" is the appropriate verb for the API
+  if (options.print_output) {
+    print_json_output(working_filepath, "all");
   }
 
-  /*  if (options.sanitise) {
-      puts("Sanitize!\n");
-      sanitise_json(filepath);
-    } */
-
-  if (options.del || options.force_update || options.add) {
+  // Print something to say we're done
+  if (options.del || options.force_update || options.add || options.autoupdate) {
     V("Done");
   }
 
-  Sfree(filepath);
-  Sfree(options.username);
-  Sfree(options.password);
+  /* Free allocated memory */
+  Safe_free(working_filepath);
+  Safe_free(options.username);
+  Safe_free(options.password);
 
-  return ret;
+  return 0;
 }
