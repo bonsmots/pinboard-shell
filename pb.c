@@ -72,8 +72,8 @@
 
 /*
  * BUG/TODO: Incorrect user/pass not handled - should check for 401 response
- * BUG/TODO: Presupposes 'solarized' colour scheme on the terminal, which
- * probably is not everyone
+ * BUG/TODO: Presupposes 'solarized' colour scheme on the terminal, which probably is not everyone
+ * BUG/TODO: -oa and -ao do not result in the same behaviour
  */
 
 /*
@@ -92,6 +92,8 @@
 #include <unistd.h>  // close, getopt, getpass
 
 #include <time.h> // time types
+
+/* Time externs */
 extern char *tzname[];
 extern long int timezone;
 extern int daylight;
@@ -117,13 +119,17 @@ extern int daylight;
 
 /*
  * More option globals
- * Note: not in the options struct for ease w/ macros
+ * Note: not in the options struct for ease of use w/ macros
  */
 
 bool opt_debug;
 bool opt_super_debug;
 bool opt_verbose;
 bool opt_trace;
+
+/*
+ * Main options struct
+ */
 
 struct {
   bool remote;
@@ -149,10 +155,9 @@ struct {
  */
 
 // This is the colour pallete that we use -- the first value is the colour reset
-// TODO: maybe add choice of colour palletes
-
-char *clr[] = {"\e[0m", // This is the reset code
-               "\e[0;34m", "\e[0;36m", "\e[0;35m", "\e[1;37m"};
+// TODO: maybe add choice of colour palletes, or at least a vanilla alternative
+// The first code here is the reset code
+char *clr[] = {"\e[0m", "\e[0;34m", "\e[0;36m", "\e[0;35m", "\e[1;37m"};
 
 /* Struct to hold tag and value pairs from the JSON */
 typedef struct {
@@ -160,6 +165,7 @@ typedef struct {
   char *value;
 } pair;
 
+/* Struct for bookmarks */
 typedef struct {
   char *hash;
   char *href;
@@ -186,14 +192,12 @@ static int reformat_number(void *ctx, const char *s, size_t l) {
   return yajl_gen_status_ok == yajl_gen_number(g, s, l);
 }
 
-static int reformat_string(void *ctx, const unsigned char *stringVal,
-                           size_t stringLen) {
+static int reformat_string(void *ctx, const unsigned char *stringVal, size_t stringLen) {
   yajl_gen g = (yajl_gen)ctx;
   return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
 }
 
-static int reformat_map_key(void *ctx, const unsigned char *stringVal,
-                            size_t stringLen) {
+static int reformat_map_key(void *ctx, const unsigned char *stringVal, size_t stringLen) {
   yajl_gen g = (yajl_gen)ctx;
   return yajl_gen_status_ok == yajl_gen_string(g, stringVal, stringLen);
 }
@@ -218,6 +222,7 @@ static int reformat_end_array(void *ctx) {
   return yajl_gen_status_ok == yajl_gen_array_close(g);
 }
 
+// TODO: should explain
 static yajl_callbacks callbacks = {reformat_null,
                                    reformat_boolean,
                                    NULL,
@@ -236,6 +241,7 @@ int check_dir(char *dirpath) {
   int status;
   int fildes;
 
+  // Will print trace if opt_trace is on
   Trace();
 
   /* Open, get status, close */
@@ -249,12 +255,15 @@ int check_dir(char *dirpath) {
 
     // TODO: should change this to tighter permissions
     status = mkdir(dirpath, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+
     /*
      * S_IRWXU read, write, execute/search by owner
      * S_IRWXG read, * write, execute/search by group
      * S_IROTH read permission, others
      * S_IXOTH execute/search permission, others
      */
+
+    // Stopif will abort based on a toggle in macros.h
     Stopif(status != 0, return -1, "Make folder %s failed.", dirpath);
   }
 
@@ -264,16 +273,24 @@ int check_dir(char *dirpath) {
   close(fildes);
 
   /* Check directory, readable, writeable */
-  if (S_ISDIR(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) &&
-      ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
-    Dbg("Directory fine");
+  if (S_ISDIR(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
+    Dbg("Directory %s fine", dirpath);
   } else {
-    Dbg("Not a directory or not read/writable");
+    Dbg("Not a directory OR not read/writable at %s", dirpath);
   }
 
   return 0;
 }
 
+/**
+ * @brief Returns true if file exists else false
+ *
+ * Detailed description of what the function does, any side effects, or
+ * implementation details worth mentioning.
+ *
+ * @param param1 Description of the first parameter.
+ * @return Description of the return value.
+ */
 bool does_file_exist(char *filepath) {
   struct stat buffer;
   int status;
@@ -301,74 +318,44 @@ int make_file(char *filepath) {
 
   Trace();
 
+  // Open read-only, get info, close
   fildes = open(filepath, O_RDONLY);
   status = fstat(fildes, &buffer);
   close(fildes);
 
   if (status == -1) {
-    Dbg("Failed to open file %s, likley it doesn't exist or is not readable.",
-        filepath);
+    Dbg("Failed to open file %s, likley it doesn't exist or is not readable.", filepath);
     Dbg("Making file %s", filepath);
 
+    // See if we can open for writing, this open and close will create(?)
     // TODO: should change this to tighter permissions
-    fildes = open(filepath, O_WRONLY | O_CREAT | O_EXCL,
-                  S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    fildes = open(filepath, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 
     /*
-     * O_WRONLY write only O_CREAT create O_EXCL fail if file
-     * exists S_IRUSR read permission, owner S_IWUSR write
-     * permission, owner S_IRGRP read permission, group S_IROTH
-     * read permission, others
+     * O_WRONLY write only
+     * O_CREAT create
+     * O_EXCL fail if file exists
+     * S_IRUSR read permission, owner
+     * S_IWUSR write permission, owner
+     * S_IRGRP read permission, group
+     * S_IROTH read permission, others
      */
 
-    Stopif(fildes == -1, return -1, "Open file %s for writing has failed.",
-           filepath);
+    Stopif(fildes == -1, return -1, "Open file %s for writing has failed.", filepath);
+
     close(fildes);
   }
+
+  // Open read-only again
   fildes = open(filepath, O_RDONLY);
   status = fstat(fildes, &buffer);
   close(fildes);
 
   /* Check regular file, readable, writeable */
-  if (S_ISREG(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) &&
-      ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
+  if (S_ISREG(buffer.st_mode) && ((S_IRUSR & buffer.st_mode) == S_IRUSR) && ((S_IWUSR & buffer.st_mode) == S_IWUSR)) {
     Dbg("We are in business");
   } else {
     Dbg("Not a file or not read/writable");
-  }
-
-  close(fildes);
-
-  return 0;
-}
-
-// UNUSED
-int test_colours() {
-  int colour_count = 15;
-  char *colours[] = {
-      "\e[0;30m",
-      "\e[0;34m", //+
-      "\e[0;32m",
-      "\e[0;36m", //+
-      "\e[0;31m",
-      "\e[0;35m", //+
-      "\e[0;33m", "\e[0;37m", "\e[1;30m", "\e[1;34m", "\e[1;32m",
-      "\e[1;36m", "\e[1;31m", "\e[1;35m", "\e[1;33m",
-      "\e[1;37m" // +
-  };
-
-  char *colour_labels[] = {
-      "Black            ", "Blue             ", "Green            ",
-      "Cyan             ", "Red              ", "Purple           ",
-      "Brown            ", "Gray             ", "Dark Gray        ",
-      "Light Blue       ", "Light Green      ", "Light Cyan       ",
-      "Light Red        ", "Light Purple     ", "Yellow           ",
-      "White            "};
-
-  Trace();
-
-  for (int i = 0; i < (colour_count - 1); i++) {
-    printf("%s%s\n", colours[i], colour_labels[i]);
   }
 
   return 0;
@@ -376,9 +363,9 @@ int test_colours() {
 
 /* From example at http://curl.haxx.se/libcurl/c/simple.html */
 /* TODO: add check for 401 response */
+/* TODO: check against https://curl.se/libcurl/c/https.html */
 
 // Pulls file at URL using CURL, writes to filepath
-
 int curl_grab(char *url, char *filepath, char *username, char *password) {
   CURL *curl;
   CURLcode res;
@@ -403,9 +390,11 @@ int curl_grab(char *url, char *filepath, char *username, char *password) {
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
     curl_easy_setopt(curl, CURLOPT_USERNAME, username);
     curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
-    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect
-    res = curl_easy_perform(
-        curl); /* Perform the request, res will get the return code */
+    // Follow redirect
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+
+    /* Perform the request, res will get the return code */
+    res = curl_easy_perform(curl);
 
     if (res != CURLE_OK) { /* Check for errors */
       fprintf(se, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -425,6 +414,7 @@ int curl_grab(char *url, char *filepath, char *username, char *password) {
   }
 }
 
+// TODO: ?
 int curl_jam(char *url, char *username, char *password) {
   CURL *curl;
   CURLcode res;
@@ -432,6 +422,7 @@ int curl_jam(char *url, char *username, char *password) {
 
   Trace();
 
+  // if both empty return -1
   if (!strval(username) || !strval(password)) {
     return -1;
   }
@@ -442,11 +433,8 @@ int curl_jam(char *url, char *username, char *password) {
     curl_easy_setopt(curl, CURLOPT_URL, url);
     curl_easy_setopt(curl, CURLOPT_USERNAME, username);
     curl_easy_setopt(curl, CURLOPT_PASSWORD, password);
-    // curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L); // Follow redirect
-    // not used
 
-    res = curl_easy_perform(
-        curl); /* Perform the request, res will get the return code */
+    res = curl_easy_perform(curl); /* Perform the request, res will get the return code */
 
     if (res != CURLE_OK) { /* Check for errors */
       fprintf(se, "curl_easy_perform() failed: %s\n", curl_easy_strerror(res));
@@ -464,40 +452,18 @@ int curl_jam(char *url, char *username, char *password) {
   }
 }
 
-// Crudely prints file to stdout
-int simple_output(char *filedir, char *verb) {
-  char *filename;
-  char buf;
-  int fd;
-
-  Trace();
-
-  asprintf(&filename, "%s/%s.json", filedir, verb);
-
-  fd = open(filename, O_RDONLY);
-  if (!fd) {
-    return -1;
-  }
-
-  while (read(fd, &buf, 1)) {
-    putchar(buf);
-  }
-
-  close(fd);
-  free(filename);
-
-  return 0;
-}
-
-// Outputs file to stdout, nicely formatted
+// Outputs filedir/verb.json to stdout, nicely formatted
 int pretty_json_output(char *filedir, char *verb) {
   yajl_handle hand;
+
+  /* 65kb buffer */
   static unsigned char fileData[65536];
+
   /* generator config */
   yajl_gen g;
   yajl_status stat;
-  size_t rd;
-  int retval = 0;
+  size_t read_size;
+  int return_val = 0;
   FILE *fp;
   char *filename;
 
@@ -506,32 +472,41 @@ int pretty_json_output(char *filedir, char *verb) {
   asprintf(&filename, "%s/%s.json", filedir, verb);
 
   fp = fopen(filename, "r");
+  // TODO: feels like stuff like this should use Stopif?
   if (!fp) {
     return -1;
   }
 
+  // Can specify our own memory allocator, NULL means use default
   g = yajl_gen_alloc(NULL);
+
+  // Nice-looking output
   yajl_gen_config(g, yajl_gen_beautify, 1);
+
+  // Check input is UTF-8
   yajl_gen_config(g, yajl_gen_validate_utf8, 1);
 
   /* ok.  open file.  let's read and parse */
   hand = yajl_alloc(&callbacks, NULL, (void *)g);
+
   /* and let's allow comments by default */
   yajl_config(hand, yajl_allow_comments, 1);
 
   for (;;) {
-    rd = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
+    read_size = fread((void *)fileData, 1, sizeof(fileData) - 1, fp);
 
-    if (rd == 0) {
+    if (read_size == 0) {
+      // if not EOF something funny going on, set return_val and break
       if (!feof(fp)) {
         fprintf(se, "error on file read.\n");
-        retval = 1;
+        return_val = 1;
       }
       break;
     }
-    fileData[rd] = 0;
 
-    stat = yajl_parse(hand, fileData, rd);
+    fileData[read_size] = 0;
+
+    stat = yajl_parse(hand, fileData, read_size);
 
     if (stat != yajl_status_ok) {
       break;
@@ -550,10 +525,10 @@ int pretty_json_output(char *filedir, char *verb) {
   stat = yajl_complete_parse(hand);
 
   if (stat != yajl_status_ok) {
-    unsigned char *str = yajl_get_error(hand, 1, fileData, rd);
+    unsigned char *str = yajl_get_error(hand, 1, fileData, read_size);
     fprintf(se, "%s", (const char *)str);
     yajl_free_error(hand, str);
-    retval = 1;
+    return_val = 1;
   }
 
   yajl_gen_free(g);
@@ -561,7 +536,7 @@ int pretty_json_output(char *filedir, char *verb) {
   fclose(fp);
 
   free(filename);
-  return retval;
+  return return_val;
 }
 
 // API bits
@@ -581,8 +556,7 @@ int api_del(char *username, char *password, char *webaddr) {
   curl = curl_easy_init();
   escaped_url = curl_easy_escape(curl, webaddr, 0);
 
-  asprintf(&url, "https://api.pinboard.in/v1/posts/delete?url=%s&format=json",
-           escaped_url);
+  asprintf(&url, "https://api.pinboard.in/v1/posts/delete?url=%s&format=json", escaped_url);
 
   V("Using:\n%s as URL\n", url);
 
@@ -601,8 +575,7 @@ int api_add(char *username, char *password, char *webaddr, char *title) {
   int retval = -1;
   Trace();
 
-  if (!strval(username) || !strval(password) || !strval(webaddr) ||
-      !strval(title)) {
+  if (!strval(username) || !strval(password) || !strval(webaddr) || !strval(title)) {
     return -1;
   }
 
@@ -611,10 +584,7 @@ int api_add(char *username, char *password, char *webaddr, char *title) {
   escaped_url = curl_easy_escape(curl, webaddr, 0);
   escaped_title = curl_easy_escape(curl, title, 0);
 
-  asprintf(
-      &url,
-      "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s",
-      escaped_url, escaped_title);
+  asprintf(&url, "https://api.pinboard.in/v1/posts/add?format=json&url=%s&description=%s", escaped_url, escaped_title);
 
   V("Using:\n%s as URL\n", url);
 
@@ -634,7 +604,9 @@ int api_download(char *verb, char *username, char *password, char *directory) {
 
   Trace();
 
+  // API endpoint
   asprintf(&url, "https://api.pinboard.in/v1/posts/%s&format=json", verb);
+  // where we save the response to
   asprintf(&filepath, "%s/%s.json", directory, verb);
 
   /* TODO: check update time */
@@ -781,9 +753,8 @@ int parse_handoff(unsigned char *buf, size_t len) {
       count++;
     }
 
-    tag = !tag; /* Toggle tag and value */
-    cp = strtok(NULL,
-                tokens); /* Breaks string into tokens -- subsequent tokens */
+    tag = !tag;                /* Toggle tag and value */
+    cp = strtok(NULL, tokens); /* Breaks string into tokens -- subsequent tokens */
   }
 
   Dbg("Tokenising complete on %i strings", count);
@@ -795,8 +766,8 @@ int parse_handoff(unsigned char *buf, size_t len) {
 
   for (int j = 0; j < count; j++) {
     /* If any of the tag strings are the strings we are interested in */
-    if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") ||
-        strstr(pairs[j].tag, "tags") || strstr(pairs[j].tag, "hash")) {
+    if (strstr(pairs[j].tag, "href") || strstr(pairs[j].tag, "description") || strstr(pairs[j].tag, "tags") ||
+        strstr(pairs[j].tag, "hash")) {
       /* Put the values in */
       /* strstr() returns the pointer to first occurance of substring in the
        * sring */
@@ -816,8 +787,7 @@ int parse_handoff(unsigned char *buf, size_t len) {
 
       /* If now all non-null values, increment */
       /* bm_count used when we print to screen so know when done */
-      if (strval(bm[i].hash) && strval(bm[i].href) && strval(bm[i].desc) &&
-          strval(bm[i].tags)) {
+      if (strval(bm[i].hash) && strval(bm[i].href) && strval(bm[i].desc) && strval(bm[i].tags)) {
         i++;
         bm_count++;
       }
@@ -837,8 +807,7 @@ int parse_handoff(unsigned char *buf, size_t len) {
   for (int j = 0; j < bm_count; j++) {
     // If this is set we are searching, otherwise we are listing
     if (strval(options.search_str)) {
-      if ((strcasestr(bm[j].hash, options.search_str) != NULL) ||
-          (strcasestr(bm[j].desc, options.search_str) != NULL) ||
+      if ((strcasestr(bm[j].hash, options.search_str) != NULL) || (strcasestr(bm[j].desc, options.search_str) != NULL) ||
           (strcasestr(bm[j].href, options.search_str) != NULL)) {
         if (options.no_colours) {
           if (options.hashes) {
@@ -1039,8 +1008,7 @@ char *file_to_mem(char *directory, char *verb, int *size) {
  * max is sizeof data_from
  */
 
-void simple_parse_field(int field, char delim, char *data_from, char *data_to,
-                        int max) {
+void simple_parse_field(int field, char delim, char *data_from, char *data_to, int max) {
   char *loc, *out;
   bool in_field = false;
   int in_field_count = 0;
@@ -1187,8 +1155,7 @@ double time_since_last_mod(char *file) {
   V("Current time %s", buffer);
 
   seconds_age = difftime(mktime(&current_tm), mktime(&file_tm));
-  V("Delta in seconds %.0f, minutes %.2f, hours %.2f", seconds_age,
-    seconds_age / 60.0, seconds_age / 60.0 / 60.0);
+  V("Delta in seconds %.0f, minutes %.2f, hours %.2f", seconds_age, seconds_age / 60.0, seconds_age / 60.0 / 60.0);
 
   return seconds_age;
 }
@@ -1210,8 +1177,7 @@ bool is_file_more_recent(char *file, struct tm dt_tm) {
 
   // TODO: this seems not to work properly
   delta = difftime(mktime(&file_tm), mktime(&dt_tm));
-  V("Delta in seconds %.0f, minutes %.2f, hours %.2f", delta, delta / 60.0,
-    delta / 60.0 / 60.0);
+  V("Delta in seconds %.0f, minutes %.2f, hours %.2f", delta, delta / 60.0, delta / 60.0 / 60.0);
 
   return (delta > 0);
 }
@@ -1355,45 +1321,44 @@ int main(int argc, char *argv[]) {
 
   char msg_warn[] = "NOTE: CURRENTLY STILL IN DEVELOPMENT";
 
-  char msg_usage[] =
-      "______________\n"
-      "pinboard-shell\n"
-      "______________\n"
-      "\n"
-      "Usage:\n"
-      "ADD:\n"
-      "-t Title -u \"https://url.com/\" \n"
-      "DELETE:\n"
-      "-r \"string\" \n"
-      "SEARCH:\n"
-      "-s \"string\"\n"
-      "LIST:\n"
-      "-o flag to list data\n"
-      "-w do not output tags\n"
-      "-c toggle tags only\n"
-      "-p turn off formatting e.g. for redirecting stdout to a file\n"
-      "UPDATE:\n"
-      "-a auto update: updates if the API says it has updated since last "
-      "downloaded\n"
-      "-f force update: forces update\n" /* TODO: check flow control */
-      "OTHER:\n"
-      "-v toggle verbose\n"
-      "-d turn debug mode on\n"
-      "-h this help\n"
-      "\n"
-      "Example usage:\n"
-      "Download bookmarks file from pinboard.in\n"
-      "./pb -f\n"
-      "OR\n"
-      "Output only\n"
-      "./pb -o\n"
-      "\n"
-      "Further example usage:\n"
-      "List most frequent tags:\n./pb -ocp | sort | awk '{ print $NF }' | uniq "
-      "-c | sort -nr | less\n"
-      "List those tagged with $TAG for export to a file:\n./pb -op | grep "
-      "--color=never -B2 $TAG > $TAG.tagged\n"
-      "\n";
+  char msg_usage[] = "______________\n"
+                     "pinboard-shell\n"
+                     "______________\n"
+                     "\n"
+                     "Usage:\n"
+                     "ADD:\n"
+                     "-t Title -u \"https://url.com/\" \n"
+                     "DELETE:\n"
+                     "-r \"string\" \n"
+                     "SEARCH:\n"
+                     "-s \"string\"\n"
+                     "LIST:\n"
+                     "-o flag to list data\n"
+                     "-w do not output tags\n"
+                     "-c toggle tags only\n"
+                     "-p turn off formatting e.g. for redirecting stdout to a file\n"
+                     "UPDATE:\n"
+                     "-a auto update: updates if the API says it has updated since last "
+                     "downloaded\n"
+                     "-f force update: forces update\n" /* TODO: check flow control */
+                     "OTHER:\n"
+                     "-v toggle verbose\n"
+                     "-d turn debug mode on\n"
+                     "-h this help\n"
+                     "\n"
+                     "Example usage:\n"
+                     "Download bookmarks file from pinboard.in\n"
+                     "./pb -f\n"
+                     "OR\n"
+                     "Output only\n"
+                     "./pb -o\n"
+                     "\n"
+                     "Further example usage:\n"
+                     "List most frequent tags:\n./pb -ocp | sort | awk '{ print $NF }' | uniq "
+                     "-c | sort -nr | less\n"
+                     "List those tagged with $TAG for export to a file:\n./pb -op | grep "
+                     "--color=never -B2 $TAG > $TAG.tagged\n"
+                     "\n";
 
   error_mode = 's'; /* Makes Stopif use abort() */
   int c;
@@ -1539,13 +1504,11 @@ int main(int argc, char *argv[]) {
   }
 
   tzset(); /* Set timezone I do believe */
-  Dbg("tzname: %s,%s timezone: %li daylight: %i", tzname[0], tzname[1],
-      timezone, daylight);
+  Dbg("tzname: %s,%s timezone: %li daylight: %i", tzname[0], tzname[1], timezone, daylight);
 
   /* Username and password are set */
   if (options.username && options.password) {
-    Dbg("Using: %s as username, %s as password", options.username,
-        options.password);
+    Dbg("Using: %s as username, %s as password", options.username, options.password);
     /* Ask for them if not set and we are needing to connect */
   } else if (options.remote && (!options.username || !options.password)) {
     char b1[512];
@@ -1564,8 +1527,7 @@ int main(int argc, char *argv[]) {
 
   /* If these are both set we want to add and then quit */
   if (strval(options.add_url) && strval(options.add_title)) {
-    api_add(options.username, options.password, options.add_url,
-            options.add_title);
+    api_add(options.username, options.password, options.add_url, options.add_title);
   }
 
   /*
