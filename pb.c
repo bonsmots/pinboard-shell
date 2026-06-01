@@ -91,12 +91,18 @@
 #include <string.h>  // strstr, strdup, strtok
 #include <unistd.h>  // close, getopt, getpass
 
-#include <time.h> // time types
+#include <stdint.h> // intmax_t
+#include <time.h>   // time types
 
 /* Time externs */
+/* glibc only exposes these under certain feature macros; declare them
+ * explicitly. On the BSDs tzname is already in <time.h>, and `timezone`
+ * is a function there, so the globals must not be redeclared. */
+#if defined(__linux__)
 extern char *tzname[];
 extern long int timezone;
 extern int daylight;
+#endif
 
 #include <curl/curl.h> // curl
 #include <sys/stat.h>  // fstat
@@ -949,10 +955,10 @@ char *file_to_mem(char *directory, char *verb, int *size) {
   close(fildes);
 
   *size = buffer.st_size;
-  V("%lld bytes size, %d bytes", buffer.st_size, *size);
+  V("%jd bytes size, %d bytes", (intmax_t)buffer.st_size, *size);
   if (buffer.st_size > 1000000) {
     // If more than a meg something is going wrong, bail
-    Ftl("File is %lld big which doesn't make sense, bailing", buffer.st_size);
+    Ftl("File is %jd big which doesn't make sense, bailing", (intmax_t)buffer.st_size);
   } else {
     data = malloc(buffer.st_size + 1);
   }
@@ -1423,7 +1429,12 @@ int main(int argc, char *argv[]) {
   }
 
   tzset(); /* Set timezone */
-  Dbg("tzname: %s,%s timezone: %li daylight: %i", tzname[0], tzname[1], timezone, daylight);
+#if defined(__linux__)
+  Dbg("tzname: %s,%s timezone: %li daylight: %i", tzname[0], tzname[1], timezone,
+      daylight);
+#else
+  Dbg("tzname: %s,%s", tzname[0], tzname[1]);
+#endif
 
   /* Username and password are set */
   if (options.username && options.password) {
